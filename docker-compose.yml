@@ -65,8 +65,8 @@ services:
   chroma:
     image: chromadb/chroma:0.5.23
     container_name: finance-rag-chroma
-    ports:
-      - "8001:8000"
+    # ports:
+    #   - "8001:8000"
     volumes:
       - ./chroma:/chroma/chroma
     healthcheck:
