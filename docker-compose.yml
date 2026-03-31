@@ -1,0 +1,78 @@
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: app/api/Dockerfile
+    container_name: finance-rag-api
+    env_file:
+      - .env.example
+    environment:
+      APP_ENV: dev
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      SQLITE_PATH: /workspace/data/processed/finance.db
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app/api/app:/workspace/app
+      - ./data:/workspace/data
+    depends_on:
+      chroma:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: app/frontend/Dockerfile
+    container_name: finance-rag-frontend
+    environment:
+      API_BASE_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./app/frontend:/workspace
+    depends_on:
+      api:
+        condition: service_healthy
+
+  ingest:
+    build:
+      context: .
+      dockerfile: app/ingest/Dockerfile
+    container_name: finance-rag-ingest
+    environment:
+      SQLITE_PATH: /workspace/data/processed/finance.db
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
+    volumes:
+      - ./app/ingest/src:/workspace/src
+      - ./data:/workspace/data
+    depends_on:
+      chroma:
+        condition: service_healthy
+    command: ["python", "src/pipeline.py"]
+    profiles: ["ingest"]
+
+  chroma:
+    image: chromadb/chroma:0.5.23
+    container_name: finance-rag-chroma
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./chroma:/chroma/chroma
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/heartbeat').read()"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
