@@ -1,3 +1,5 @@
+import os
+import json
 import pytest
 import pandas as pd
 import numpy as np
@@ -6,8 +8,12 @@ from src.pipeline import (
     clean_account, 
     clean_note, 
     extract_financial_statement, 
-    extract_equity_statement
+    extract_equity_statement,
+    run_pipeline
 )
+from pathlib import Path
+
+TEST_DATA_DIR = Path(__file__).parent / "test_data" / "raw"
 
 # ==========================================
 # 1. 단위 테스트: 데이터 정제 헬퍼 함수 검증
@@ -89,3 +95,56 @@ def test_extract_equity_statement_nan_handling():
     기초자본_행 = extracted_rows[0]
     assert 기초자본_행[-1] == 0 
     assert 기초자본_행[-2] == 100000000  # 100.0 이 100만 배 처리되어 정수로 들어갔는지 확인
+
+# ==========================================
+#🚀 4. 통합 테스트 (실제 HTML 파일 활용)
+# ==========================================
+def test_full_pipeline_with_real_file(tmp_path):
+    """
+    실제 HTML 파일을 읽어 파이프라인 전체를 실행하고, 
+    생성된 JSON 파일의 구조가 완벽한지 검증합니다.
+    """
+    
+    # 1. 준비: 테스트용 HTML 파일이 폴더에 있는지 확인
+    test_files = list(TEST_DATA_DIR.glob("*.htm*"))
+    if not test_files:
+        pytest.skip(f"테스트 중단: {TEST_DATA_DIR} 폴더에 HTML 파일이 없습니다. 파일을 하나 넣어주세요!")
+
+    # 2. 실행: 파이프라인 가동!
+    # tmp_path는 pytest가 제공하는 '일회용 임시 폴더'입니다.
+    # 테스트가 끝나면 결과물을 자동으로 싹 지워주어 폴더가 지저분해지지 않습니다.
+    run_pipeline(str(TEST_DATA_DIR), str(tmp_path))
+
+    # 3. 검증 1: JSON 파일이 제대로 생성되었는가?
+    output_files = list(tmp_path.glob("*.json"))
+    assert len(output_files) > 0, "에러: JSON 결과 파일이 생성되지 않았습니다!"
+
+    # 4. 검증 2: 생성된 JSON을 열어서 내부 구조가 맞는지 꼼꼼히 확인
+    with open(output_files[0], 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    # 최상위 키(연도) 추출 (예: "2018")
+    year_key = list(data.keys())[0]
+    
+    # 해당 연도 데이터 추출
+    year_data = data[year_key]
+
+    # 우리가 파이프라인에서 추출하기로 한 '핵심 6대장'이 잘 들어있는지 확인
+    assert "감사보고서" in year_data, "'감사보고서' 섹션이 누락되었습니다."
+    assert "재무상태표" in year_data, "'재무상태표' 섹션이 누락되었습니다."
+    assert "손익계산서" in year_data, "'손익계산서' 섹션이 누락되었습니다."
+    assert "포괄손익계산서" in year_data, "'포괄손익계산서' 섹션이 누락되었습니다."
+    assert "자본변동표" in year_data, "'자본변동표' 섹션이 누락되었습니다."
+    assert "부록" in year_data, "'부록' 섹션이 누락되었습니다."
+    assert "주석" in year_data, "'주석' 섹션이 누락되었습니다."
+
+    # 5. 검증 3: 상세 로직 확인 (예: 도입부가 잘 파싱되었는지?)
+    assert "도입부" in year_data["감사보고서"]["sub_sections"], "도입부 텍스트가 추출되지 않았습니다."
+    
+    # 6. 검증 4: 배제 단어(exclude_keywords)가 잘 작동해서 표가 섞이지 않았는지 간접 확인
+    # 포괄손익계산서 안에 '총포괄손익'이 있는지 확인 (자본변동표로 대체되었다면 이 테스트에서 걸림)
+    cis_tables = year_data["포괄손익계산서"].get("tables", [])
+    if cis_tables:
+        # 표의 모든 텍스트를 하나의 문자열로 합쳐서 확인
+        table_content_str = str(cis_tables[0]["rows"])
+        assert "포괄" in table_content_str, "포괄손익계산서 표 내용이 비정상적입니다 (표 섞임 의심)."
