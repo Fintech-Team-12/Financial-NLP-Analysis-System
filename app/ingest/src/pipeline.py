@@ -255,6 +255,36 @@ def parse_appendix(soup):
             
     return {"부록": appendix_data}
 
+# ------------------------------------------
+# [추가됨] 주석 파싱 로직 (parsing (1).ipynb 통합)
+# ------------------------------------------
+def parse_notes(soup):
+    notes_data = {
+        "title": "재무제표에 대한 주석",
+        "content": "",
+        "tables": [],
+        "sub_sections": {}
+    }
+    
+    note_tag = soup.find(string=re.compile(r'재무제표에\s*대한\s*주석|주\s*석\s*사항'))
+    if note_tag:
+        parent = note_tag.find_parent(['p', 'div', 'h1', 'h2', 'h3'])
+        if parent:
+            content = []
+            tables = []
+            for sibling in parent.find_next_siblings(['p', 'div', 'table']):
+                if sibling.get_text(strip=True) and re.search(r'독립된\s*감사인의\s*감사보고서|내부회계관리제도', sibling.get_text()):
+                    break
+                if sibling.name == 'table':
+                    columns = [str(i) for i in range(len(sibling.find('tr').find_all(['td', 'th'])))] if sibling.find('tr') else ["0"]
+                    tables.append(html_table_to_dict(sibling, columns))
+                else:
+                    content.append(clean_text(sibling.get_text(strip=True)))
+            notes_data['content'] = "\n".join([c for c in content if c])
+            notes_data['tables'] = tables
+            
+    return {"주석": notes_data}
+
 # ==========================================
 # 3. 메인 파이프라인 함수
 # ==========================================
@@ -293,6 +323,9 @@ def run_pipeline(raw_dir: str, processed_dir: str):
         year_data[year].update(extract_financial_statement(tables, "자본변동표", ['자본금', '이익잉여금', '자본총계']))
         year_data[year].update(extract_financial_statement(tables, "현금흐름표", ['영업활동현금흐름', '투자활동현금흐름']))
         year_data[year].update(parse_appendix(soup))
+        
+        # 💥 [추가됨] 주석 로직 파이프라인 결합
+        year_data[year].update(parse_notes(soup))
 
         save_path = os.path.join(processed_dir, f'audit_report_{year}_structured.json')
         with open(save_path, 'w', encoding='utf-8') as f:
