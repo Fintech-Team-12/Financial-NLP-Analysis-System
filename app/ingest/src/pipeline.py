@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from pathlib import Path
 
 # ==========================================
-# 1. 헬퍼 함수 (기존 파이프라인용)
+# 1. 헬퍼 함수 (기존 파이프라인용) - 고정
 # ==========================================
 def clean_text(text):
     if not text: return ""
@@ -97,7 +97,7 @@ def html_table_to_dict(table_tag, columns):
     }
 
 # ==========================================
-# 💥 [추가됨] 은정님의 주석 전용 헬퍼 함수
+# 주석 전용 헬퍼 함수 - 고정
 # ==========================================
 def html_table_to_dict_notes(table_tag):
     marker_pattern = r'(\(\s*\*+\s*\d+\s*\)|\(\s*\*+.*?\).?|\*+\s*\d+|\(주\s*\d*\)|주\s*\d+\s*[)\.]?|주\s*:)'
@@ -190,43 +190,80 @@ def clean_tree(node):
 # ==========================================
 # 2. 개별 파싱 모듈 함수
 # ==========================================
-def parse_intro(soup):
-    intro_data = {}
-    audit_report = soup.find(string=re.compile(r'독립된\s*감사인의\s*감사보고서'))
-    if audit_report:
-        container = audit_report.find_parent(['p', 'div'])
-        content_parts = []
-        if container:
-            for sibling in container.find_next_siblings(['p', 'div', 'table']):
-                if re.search(r'회사의\s*개요', sibling.get_text()): break
-                content_parts.append(clean_text(sibling.get_text(separator=" ", strip=True)))
-        intro_data["감사보고서"] = {
-            "title": "독립된 감사인의 감사보고서",
-            "content": " ".join(content_parts) if content_parts else "",
-            "tables": [],
-            "sub_sections": {}
-        }
-        
-    company_overview = soup.find(string=re.compile(r'1\.\s*회사의\s*개요'))
-    if company_overview:
-        container = company_overview.find_parent(['p', 'div'])
-        content_parts = []
-        if container:
-            for sibling in container.find_next_siblings(['p', 'div', 'table']):
-                if re.search(r'2\.\s*재무제표\s*작성기준', sibling.get_text()): break
-                content_parts.append(clean_text(sibling.get_text(separator=" ", strip=True)))
-        intro_data["회사의개요"] = {
-            "title": "회사의 개요",
-            "content": " ".join(content_parts) if content_parts else "",
-            "tables": [],
-            "sub_sections": {}
-        }
-    return intro_data
 
-def extract_financial_statement(tables, title, keywords):
+# 감사보고서 파싱 (문제 1,2 완전 해결 본) - 고정
+def parse_intro(soup):
+    pure_text = soup.get_text(separator='\n', strip=True)
+    
+    end_pattern = r'\(\s*첨부\s*\)\s*재\s*무\s*제\s*표|\[\s*첨부\s*\]\s*재\s*무\s*제\s*표|재\s*무\s*상\s*태\s*표\s*제\s*\d+\s*기|연\s*결\s*재\s*무\s*상\s*태\s*표'
+    split_by_end = re.split(end_pattern, pure_text)
+    audit_report_only = split_by_end[0] 
+    
+    headers = [
+        r'재무제표에 대한 경영진과 지배기구의 책임',
+        r'재무제표에 대한 경영진 등의 책임',
+        r'재무제표에 대한 경영진의 책임',
+        r'재무제표감사에 대한 감사인의 책임',
+        r'재무제표에 대한 감사인의 책임',
+        r'감사인의 책임',
+        r'감사의견근거',
+        r'감사의견 근거',
+        r'감사의견',
+        r'기타사항',
+        r'강조사항',
+        r'핵심감사사항',
+        r'계속기업 관련 중요한 불확실성'
+    ]
+    
+    headers_pattern = r'(?:\n|^|(?<=\.)\s+)(?:[0-9ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+\.\s*)?(' + '|'.join(headers) + r')(?=\n|\s|$)'
+    parts = re.split(headers_pattern, audit_report_only)
+    
+    report_data = {
+        "title": "감사보고서 본문",
+        "content": "독립된 회계감사인의 감사보고서 본문입니다.",
+        "tables": [],
+        "sub_sections": {}
+    }
+    
+    intro_text = parts[0].strip()
+    intro_text = re.sub(r'\s+', ' ', intro_text)
+    if intro_text:
+        report_data["sub_sections"]["도입부"] = {
+            "title": "도입부",
+            "content": intro_text,
+            "tables": [],
+            "sub_sections": {}
+        }
+
+    current_main_section = None
+    for i in range(1, len(parts)-1, 2):
+        section_title = parts[i].strip()
+        section_title = re.sub(r'\s+', ' ', section_title)
+        section_content = parts[i+1].strip()
+        section_content = re.sub(r'\s+', ' ', section_content)
+        
+        if section_title not in report_data["sub_sections"]:
+            report_data["sub_sections"][section_title] = {
+                "title": section_title,
+                "content": section_content,
+                "tables": [],
+                "sub_sections": {}
+            }
+            current_main_section = section_title
+        else:
+            if current_main_section:
+                report_data["sub_sections"][current_main_section]["content"] += " " + section_title + " " + section_content
+        
+    return {"감사보고서": report_data}
+
+def extract_financial_statement(tables, title, keywords, exclude_keywords=None):
+    if exclude_keywords is None:
+        exclude_keywords = []
+        
     for df in tables:
         df_string = df.to_string().replace(" ", "")
-        if all(kw in df_string for kw in keywords):
+        
+        if all(kw in df_string for kw in keywords) and not any(ex_kw in df_string for ex_kw in exclude_keywords):
             target_df = df.copy()
             if isinstance(target_df.columns, pd.MultiIndex):
                 target_df.columns = [str(col) for col in target_df.columns]
@@ -272,6 +309,125 @@ def extract_financial_statement(tables, title, keywords):
                 }
     return {}
 
+# 💥 [핵심 변경] 은정님의 자본변동표수정.py 원본 로직 통째로 이식!
+def extract_equity_statement(tables, title="자본변동표"):
+    def clean_event(name):
+        if pd.isna(name): return name
+        return str(name).strip().replace("\n", "")
+        
+    target_df = None
+    for df in tables:
+        df_string = df.to_string().replace(" ", "")
+        
+        # 자본변동표 식별 조건 (원본 코드 그대로)
+        if ('자본금' in df_string and '이익잉여금' in df_string and 
+            ('기말' in df_string or '기초' in df_string or '당기순' in df_string or '배당' in df_string) and
+            '유동자산' not in df_string and '매출액' not in df_string):
+            
+            target_df = df.copy()
+            break
+            
+    if target_df is not None:
+        if isinstance(target_df.columns, pd.MultiIndex):
+            new_cols = []
+            for col in target_df.columns:
+                valid_names = [str(c).replace(" ", "") for c in col if 'Unnamed' not in str(c) and str(c) != 'nan']
+                if valid_names:
+                    new_cols.append(valid_names[-1]) 
+                else:
+                    new_cols.append("항목")
+            target_df.columns = new_cols
+        else:
+            target_df.columns = [str(c).replace(" ", "") for c in target_df.columns]
+
+        # 주석 컬럼 찾기
+        note_col = None
+        for c in target_df.columns:
+            if '주석' in str(c).replace(" ", "") or '비고' in str(c).replace(" ", ""):
+                note_col = c
+                break
+
+        target_df = target_df.rename(columns={target_df.columns[0]: '구분'})
+        target_df = target_df.dropna(how='all') 
+        target_df['구분'] = target_df['구분'].apply(clean_event)
+        target_df = target_df.dropna(subset=['구분'])
+        
+        # 주석 처리 적용
+        if note_col:
+            target_df['관련주석'] = target_df[note_col].apply(clean_note)
+        else:
+            target_df['관련주석'] = [[] for _ in range(len(target_df))]
+
+        # 금액 컬럼만 따로 필터링
+        val_cols = [c for c in target_df.columns if c not in ['구분', note_col, '관련주석']]
+        
+        for col in val_cols:
+            target_df[col] = target_df[col].apply(clean_amount)
+        
+        processed_records = []
+        current_parent = "기초 및 기말 잔액"
+
+        # 레코드 생성 (금액 100만 배 처리 포함)
+        for _, row in target_df.iterrows():
+            event_name = row['구분']
+            
+            total_sum = sum(abs(row[c]) for c in val_cols if isinstance(row[c], (int, float)))
+            
+            if total_sum == 0:
+                current_parent = event_name
+            else:
+                balance_keywords = ['기초', '기말', '잔액', '1월1일', '12월31일', '1.1', '12.31']
+                is_balance = any(k in event_name.replace(" ", "") for k in balance_keywords)
+                
+                if is_balance:
+                    parent_name = "기초 및 기말 잔액" 
+                    current_parent = "기타 변동" 
+                else:
+                    parent_name = current_parent
+
+                record = {
+                    "상위구분": parent_name,
+                    "구분": event_name,
+                    "관련주석": row['관련주석']
+                }
+                
+                for c in val_cols:
+                    val = row[c]
+                    if pd.isna(val):
+                        record[c] = 0
+                    elif isinstance(val, (int, float)):
+                        record[c] = int(val * 1000000) # 정수로 깔끔하게 100만 배
+                    else:
+                        record[c] = val
+                    
+                processed_records.append(record)
+        
+        # 리스트(딕셔너리) 형태를 Master JSON 스키마 구조로 변환
+        final_columns = ["상위구분", "구분", "관련주석"] + val_cols
+        
+        table_rows = []
+        for record in processed_records:
+            row_data = [record.get(col, None) for col in final_columns]
+            table_rows.append(row_data)
+
+        return {
+            title: {
+                "title": title,
+                "content": f"회사의 {title}입니다.",
+                "tables": [
+                    {
+                        "unit": "(단위: 원)",
+                        "columns": final_columns,
+                        "rows": table_rows,
+                        "annotations": []
+                    }
+                ],
+                "sub_sections": {}
+            }
+        }
+    return {}
+
+# 부록 함수 - 고정
 def parse_appendix(soup):
     appendix_data = {
         "title": "감사보고서 부록",
@@ -280,81 +436,56 @@ def parse_appendix(soup):
         "sub_sections": {}
     }
     
-    target_tags_1 = soup.find_all(string=re.compile(r'내부회계관리제도\s*검토보고서|내부회계관리제도\s*감사보고서'))
-    if target_tags_1:
-        start_tag = target_tags_1[0].find_parent(['p', 'div', 'h1', 'h2', 'h3'])
-        if start_tag:
-            content = []
-            tables = []
-            for sibling in start_tag.find_next_siblings(['p', 'div', 'table', 'h1', 'h2', 'h3']):
-                text = sibling.get_text(strip=True)
-                if re.search(r'운영실태\s*평가보고서|운영실태보고서|운영실태\s*보고서', text) and not re.search(r'검토보고서|감사보고서', text):
-                    break
-                if sibling.name == 'table':
-                    columns = [str(i) for i in range(len(sibling.find('tr').find_all(['td', 'th'])))] if sibling.find('tr') else ["0"]
-                    tables.append(html_table_to_dict(sibling, columns))
-                else:
-                    content.append(clean_text(text))
-            appendix_data["sub_sections"]["감사인의 내부회계관리제도 보고서"] = {
-                "title": "감사인의 내부회계관리제도 보고서",
-                "content": "\n".join([c for c in content if c]),
-                "tables": tables,
-                "sub_sections": {}
-            }
-
-    target_tags_2 = soup.find_all(string=re.compile(r'내부회계관리제도\s*운영실태\s*평가보고서|내부회계관리제도\s*운영실태보고서|내부회계관리제도\s*운영실태\s*보고서'))
-    if target_tags_2:
-        start_tag = target_tags_2[-1].find_parent(['p', 'div', 'h1', 'h2', 'h3'])
-        if start_tag:
-            content = []
-            tables = []
-            for sibling in start_tag.find_next_siblings(['p', 'div', 'table', 'h1', 'h2', 'h3']):
-                text = sibling.get_text(strip=True)
-                if re.search(r'외부감사\s*실시내용', text): break
-                if sibling.name == 'table':
-                    columns = [str(i) for i in range(len(sibling.find('tr').find_all(['td', 'th'])))] if sibling.find('tr') else ["0"]
-                    tables.append(html_table_to_dict(sibling, columns))
-                else:
-                    content.append(clean_text(text))
-            appendix_data["sub_sections"]["경영진의 내부회계관리제도 운영실태보고서"] = {
-                "title": "경영진의 내부회계관리제도 운영실태보고서",
-                "content": "\n".join([c for c in content if c]),
-                "tables": tables,
-                "sub_sections": {}
-            }
-
-    target_tags_3 = soup.find_all(string=re.compile(r'외부감사\s*실시내용'))
-    if target_tags_3:
-        start_tag = target_tags_3[-1].find_parent(['p', 'div', 'h1', 'h2', 'h3'])
-        if start_tag:
-            content = []
-            tables = []
-            for sibling in start_tag.find_next_siblings(['p', 'div', 'table']):
-                if sibling.name == 'table':
-                    columns = [str(i) for i in range(len(sibling.find('tr').find_all(['td', 'th'])))] if sibling.find('tr') else ["0"]
-                    tables.append(html_table_to_dict(sibling, columns))
-                else:
-                    content.append(clean_text(sibling.get_text(strip=True)))
-            appendix_data["sub_sections"]["외부감사 실시내용"] = {
-                "title": "외부감사 실시내용",
-                "content": " ".join([c for c in content if c]),
-                "tables": tables,
-                "sub_sections": {}
-            }
+    current_section = None
+    content_buffer = []
+    tables_buffer = []
+    
+    for tag in soup.find_all(['p', 'div', 'table', 'h1', 'h2', 'h3', 'h4', 'span']):
+        if tag.name != 'table' and tag.find_parent('table'):
+            continue
             
+        text = tag.get_text(strip=True)
+        text_clean = re.sub(r'\s+', ' ', text).strip()
+        if not text_clean: continue
+        
+        if len(text_clean) < 50 and re.search(r'내부회계관리제도\s*검토보고서|내부회계관리제도\s*감사보고서', text_clean):
+            if current_section: appendix_data["sub_sections"][current_section] = {"title": current_section, "content": "\n".join(content_buffer), "tables": tables_buffer, "sub_sections": {}}
+            current_section = "감사인의 내부회계관리제도 보고서"
+            content_buffer, tables_buffer = [], []
+            continue
+        elif len(text_clean) < 50 and re.search(r'내부회계관리제도\s*운영실태\s*평가보고서|내부회계관리제도\s*운영실태보고서', text_clean) and not re.search(r'검토보고서|감사보고서', text_clean):
+            if current_section: appendix_data["sub_sections"][current_section] = {"title": current_section, "content": "\n".join(content_buffer), "tables": tables_buffer, "sub_sections": {}}
+            current_section = "경영진의 내부회계관리제도 운영실태보고서"
+            content_buffer, tables_buffer = [], []
+            continue
+        elif len(text_clean) < 50 and re.search(r'외부감사\s*실시내용', text_clean):
+            if current_section: appendix_data["sub_sections"][current_section] = {"title": current_section, "content": "\n".join(content_buffer), "tables": tables_buffer, "sub_sections": {}}
+            current_section = "외부감사 실시내용"
+            content_buffer, tables_buffer = [], []
+            continue
+            
+        if current_section:
+            if tag.name == 'table':
+                columns = [str(i) for i in range(len(tag.find('tr').find_all(['td', 'th'])))] if tag.find('tr') else ["0"]
+                res = html_table_to_dict(tag, columns)
+                if res and res["rows"]: tables_buffer.append(res)
+            else:
+                if text_clean not in content_buffer:
+                    content_buffer.append(text_clean)
+
+    if current_section:
+        appendix_data["sub_sections"][current_section] = {"title": current_section, "content": "\n".join(content_buffer), "tables": tables_buffer, "sub_sections": {}}
+        
     return {"부록": appendix_data}
 
 # ==========================================
-# 💥 [추가됨] 주석 파싱 모듈 
-# (원본 로직을 안전하게 감싸서 각 파일마다 실행되도록 처리)
+# 주석 파싱 모듈 - 고정
 # ==========================================
 def parse_complex_notes(html_content):
-    # 원본 soup 객체가 파괴되지 않도록 이 함수 안에서만 새로 파싱합니다.
     soup = BeautifulSoup(re.sub(r'\r?\n', '', html_content), 'html.parser')
     for tag in soup.find_all(['span', 'font', 'b', 'strong', 'i', 'em', 'u']): tag.unwrap()
     soup.smooth()
     
-    # --- 🚀 [수정] id="toc_5" 발견 시 그 뒤를 물리적으로 삭제 ---
     stop_node = soup.find(id="toc_5")
     if stop_node:
         for sibling in stop_node.find_all_next():
@@ -471,17 +602,19 @@ def run_pipeline(raw_dir: str, processed_dir: str):
 
         year_data = {year: {}}
 
-        # 기존 파싱 로직들
         year_data[year].update(parse_intro(soup))
-        year_data[year].update(extract_financial_statement(tables, "재무상태표", ['유동자산', '유동부채', '이익잉여금']))
-        year_data[year].update(extract_financial_statement(tables, "손익계산서", ['매출액', '영업이익', '당기순이익']))
-        year_data[year].update(extract_financial_statement(tables, "포괄손익계산서", ['당기순이익', '총포괄손익']))
-        year_data[year].update(extract_financial_statement(tables, "자본변동표", ['자본금', '이익잉여금', '자본총계']))
-        year_data[year].update(extract_financial_statement(tables, "현금흐름표", ['영업활동현금흐름', '투자활동현금흐름']))
-        year_data[year].update(parse_appendix(soup))
         
-        # 💥 [추가됨] 주석 로직 파이프라인 결합
-        # (원본을 건드리지 않기 위해 html_content 문자열을 통째로 넘김)
+        # 💥 [핵심 변경] 은정님의 포괄손익계산서 키워드 반영 (기타포괄, 총포괄, 매출액 제외)
+        year_data[year].update(extract_financial_statement(tables, "재무상태표", ['유동자산', '유동부채', '이익잉여금'], exclude_keywords=['자본변동표', '손익계산서']))
+        year_data[year].update(extract_financial_statement(tables, "손익계산서", ['매출액', '영업이익', '당기순이익'], exclude_keywords=['총포괄손익', '포괄손익계산서', '자본변동표']))
+        year_data[year].update(extract_financial_statement(tables, "포괄손익계산서", ['기타포괄', '총포괄'], exclude_keywords=['매출액', '자본금', '자본변동표']))
+        
+        # 💥 [핵심 변경] 자본변동표는 이식된 전용 함수로 호출
+        year_data[year].update(extract_equity_statement(tables, "자본변동표"))
+        
+        year_data[year].update(extract_financial_statement(tables, "현금흐름표", ['영업활동현금흐름', '투자활동현금흐름'], exclude_keywords=[]))
+        
+        year_data[year].update(parse_appendix(soup))
         year_data[year].update(parse_complex_notes(html_content))
 
         save_path = os.path.join(processed_dir, f'audit_report_{year}_structured.json')
@@ -493,7 +626,7 @@ def run_pipeline(raw_dir: str, processed_dir: str):
     print("-" * 50 + "\n🎉 전체 파이프라인 처리가 완료되었습니다!")
 
 # ==========================================
-# 4. 진입점 (기존 뼈대 구조 유지)
+# 4. 진입점 (기존 뼈대 구조 유지) - 고정
 # ==========================================
 def main() -> None:
     raw_dir = Path("./data/raw")
