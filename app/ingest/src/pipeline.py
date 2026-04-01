@@ -195,6 +195,17 @@ def clean_tree(node):
 def parse_intro(soup):
     pure_text = soup.get_text(separator='\n', strip=True)
     
+
+    # DART 특유의 늘여쓰기(자간 벌림) 강제 복구 로직
+    pure_text = re.sub(r'재\s*무\s*제\s*표', '재무제표', pure_text)
+    pure_text = re.sub(r'감\s*사\s*보\s*고\s*서', '감사보고서', pure_text)
+    pure_text = re.sub(r'손\s*익\s*계\s*산\s*서', '손익계산서', pure_text)
+    pure_text = re.sub(r'자\s*본\s*변\s*동\s*표', '자본변동표', pure_text)
+    pure_text = re.sub(r'현\s*금\s*흐\s*름\s*표', '현금흐름표', pure_text)
+    pure_text = re.sub(r'포\s*괄\s*손\s*익\s*계\s*산\s*서', '포괄손익계산서', pure_text)
+    pure_text = re.sub(r'연\s*결', '연결', pure_text)
+    pure_text = re.sub(r'삼\s*성\s*전\s*자', '삼성전자', pure_text)
+
     end_pattern = r'\(\s*첨부\s*\)\s*재\s*무\s*제\s*표|\[\s*첨부\s*\]\s*재\s*무\s*제\s*표|재\s*무\s*상\s*태\s*표\s*제\s*\d+\s*기|연\s*결\s*재\s*무\s*상\s*태\s*표'
     split_by_end = re.split(end_pattern, pure_text)
     audit_report_only = split_by_end[0] 
