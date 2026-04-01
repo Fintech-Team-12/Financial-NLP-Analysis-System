@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from pathlib import Path
 
 # ==========================================
-# 1. 헬퍼 함수
+# 1. 헬퍼 함수 (기존 파이프라인용)
 # ==========================================
 def clean_text(text):
     if not text: return ""
@@ -55,14 +55,12 @@ def adjust_unit(row, col_name):
 def html_table_to_dict(table_tag, columns):
     rows = table_tag.find_all('tr')
     if not rows: return []
-    
     table_data = []
     for row in rows:
         cells = row.find_all(['td', 'th'])
         row_data = [clean_text(cell.get_text(separator=" ", strip=True)) for cell in cells]
         if any(row_data):
             table_data.append(row_data)
-
     if not table_data: return []
     df = pd.DataFrame(table_data)
     
@@ -73,7 +71,7 @@ def html_table_to_dict(table_tag, columns):
         if text == '-': return '0'
         return text
 
-    df_cleaned = df.applymap(clean_cell)
+    df_cleaned = df.map(clean_cell) if hasattr(df, 'map') else df.applymap(clean_cell)
     raw_data_rows = df_cleaned.values.tolist()
     optimized_rows = []
     
@@ -97,6 +95,97 @@ def html_table_to_dict(table_tag, columns):
         "rows": optimized_rows,
         "annotations": []
     }
+
+# ==========================================
+# 💥 [추가됨] 은정님의 주석 전용 헬퍼 함수
+# ==========================================
+def html_table_to_dict_notes(table_tag):
+    marker_pattern = r'(\(\s*\*+\s*\d+\s*\)|\(\s*\*+.*?\).?|\*+\s*\d+|\(주\s*\d*\)|주\s*\d+\s*[)\.]?|주\s*:)'
+    annotations = []
+    captured_texts = []
+
+    for td in table_tag.find_all(['td', 'th']):
+        td_text = td.get_text(separator=" ", strip=True)
+        if re.search(marker_pattern, td_text):
+            matches = list(re.finditer(marker_pattern, td_text))
+            for idx, match in enumerate(matches):
+                marker = match.group(1); start_idx = match.end()
+                end_idx = matches[idx+1].start() if idx + 1 < len(matches) else len(td_text)
+                text_part = re.sub(r'계\s*속\s*[:;]*', '', td_text[start_idx:end_idx]).strip()
+                if text_part:
+                    annotations.append({"type": "footnote", "marker": marker.strip(), "text": text_part})
+            
+            for content in td.contents:
+                if isinstance(content, str):
+                    new_str = re.sub(marker_pattern, '', content).strip()
+                    content.replace_with(new_str)
+                elif content.name == 'br':
+                    pass
+
+    try:
+        html_str = str(table_tag)
+        dfs = pd.read_html(io.StringIO(html_str))
+        if not dfs: return None
+        df = dfs[0]
+    except: return None
+
+    columns = ["_".join([str(c) for c in col if 'Unnamed' not in str(c)]).strip() for col in df.columns] if isinstance(df.columns, pd.MultiIndex) else [str(c) for c in df.columns]
+    
+    def clean_cell_notes(val):
+        if pd.isna(val): return ""
+        text = str(val).strip().replace('\xa0', ' ').replace('\u2002', ' ').replace('\u2003', ' ')
+        text = re.sub(r'\s+', ' ', text)
+        if text == '-': return '0'
+        text = re.sub(r'\(\s*-?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(%?)\s*\)', r'-\1\2', text)
+        return re.sub(r'(?<!\d)-?\d+(?:,\d{3})*(?:\.\d+)?(?!\d)', lambda m: m.group(0).replace(',', ''), text)
+
+    df_cleaned = df.map(clean_cell_notes) if hasattr(df, 'map') else df.applymap(clean_cell_notes)
+    data_rows = df_cleaned.values.tolist()
+
+    curr_node = table_tag.next_sibling
+    search_limit = 10
+    while curr_node and search_limit > 0:
+        if getattr(curr_node, 'name', None) == 'table': break
+        node_text = curr_node.get_text(separator=" ", strip=True) if hasattr(curr_node, 'get_text') else str(curr_node).strip()
+        if not node_text:
+            curr_node = curr_node.next_sibling
+            search_limit -= 1; continue
+            
+        if re.search(marker_pattern, node_text):
+            captured_texts.append(node_text)
+            matches = list(re.finditer(marker_pattern, node_text))
+            for idx, match in enumerate(matches):
+                marker = match.group(1); start_idx = match.end()
+                end_idx = matches[idx+1].start() if idx + 1 < len(matches) else len(node_text)
+                text_part = re.sub(r'계\s*속\s*[:;]*', '', node_text[start_idx:end_idx]).strip()
+                if text_part:
+                    annotations.append({"type": "footnote", "marker": marker.strip(), "text": text_part})
+            search_limit = 10 
+        else:
+            search_limit -= 1
+        curr_node = curr_node.next_sibling
+
+    return {"columns": columns, "rows": data_rows, "annotations": annotations, "captured_texts": captured_texts}
+
+def clean_tree(node):
+    if isinstance(node, dict):
+        if "tables" in node and node["tables"]:
+            merged_tables = []; current_unit = ""
+            for tbl in node["tables"]:
+                if not tbl: continue
+                is_unit = "단위" in str(tbl.get("columns", "")) or (len(tbl.get("rows", [])) == 1 and "단위" in str(tbl["rows"]))
+                if is_unit:
+                    current_unit = str(tbl["rows"][0][0]) if tbl.get("rows") else ""
+                    continue
+                merged_tables.append({"unit": current_unit, "columns": tbl.get("columns", []), "rows": tbl.get("rows", []), "annotations": tbl.get("annotations", [])})
+                current_unit = ""
+            node["tables"] = merged_tables
+        for k, v in list(node.items()):
+            if k in ["sub_sections", "tables"] and not v: del node[k]
+            else: node[k] = clean_tree(v)
+    elif isinstance(node, str):
+        return re.sub(r' {2,}', ' ', node).strip()
+    return node
 
 # ==========================================
 # 2. 개별 파싱 모듈 함수
@@ -255,35 +344,101 @@ def parse_appendix(soup):
             
     return {"부록": appendix_data}
 
-# ------------------------------------------
-# [추가됨] 주석 파싱 로직 (parsing (1).ipynb 통합)
-# ------------------------------------------
-def parse_notes(soup):
-    notes_data = {
-        "title": "재무제표에 대한 주석",
-        "content": "",
-        "tables": [],
-        "sub_sections": {}
-    }
+# ==========================================
+# 💥 [추가됨] 주석 파싱 모듈 
+# (원본 로직을 안전하게 감싸서 각 파일마다 실행되도록 처리)
+# ==========================================
+def parse_complex_notes(html_content):
+    # 원본 soup 객체가 파괴되지 않도록 이 함수 안에서만 새로 파싱합니다.
+    soup = BeautifulSoup(re.sub(r'\r?\n', '', html_content), 'html.parser')
+    for tag in soup.find_all(['span', 'font', 'b', 'strong', 'i', 'em', 'u']): tag.unwrap()
+    soup.smooth()
     
-    note_tag = soup.find(string=re.compile(r'재무제표에\s*대한\s*주석|주\s*석\s*사항'))
-    if note_tag:
-        parent = note_tag.find_parent(['p', 'div', 'h1', 'h2', 'h3'])
-        if parent:
-            content = []
-            tables = []
-            for sibling in parent.find_next_siblings(['p', 'div', 'table']):
-                if sibling.get_text(strip=True) and re.search(r'독립된\s*감사인의\s*감사보고서|내부회계관리제도', sibling.get_text()):
-                    break
-                if sibling.name == 'table':
-                    columns = [str(i) for i in range(len(sibling.find('tr').find_all(['td', 'th'])))] if sibling.find('tr') else ["0"]
-                    tables.append(html_table_to_dict(sibling, columns))
-                else:
-                    content.append(clean_text(sibling.get_text(strip=True)))
-            notes_data['content'] = "\n".join([c for c in content if c])
-            notes_data['tables'] = tables
+    # --- 🚀 [수정] id="toc_5" 발견 시 그 뒤를 물리적으로 삭제 ---
+    stop_node = soup.find(id="toc_5")
+    if stop_node:
+        for sibling in stop_node.find_all_next():
+            sibling.decompose()
+        stop_node.decompose()
+
+    table_store = {}; all_captured_footnotes = set()
+    for idx, table in enumerate(soup.find_all('table')):
+        if table.find('table'): continue
+        res = html_table_to_dict_notes(table)
+        if res:
+            tid = f"[[TABLE_{idx}]]"
+            if "captured_texts" in res:
+                all_captured_footnotes.update(res["captured_texts"])
+            table_store[tid] = res
+            table.replace_with(f"\n{tid}\n")
+
+    pure_text = soup.get_text(separator='\n', strip=True).replace('\xa0', ' ').replace('\u2002', ' ').replace('\u2003', ' ')
+    pure_text = re.sub(r'(\d)\s+(?=\d)', r'\1', pure_text)
+    pure_text = re.sub(r'(\.)\s*(\d{1,2})\s*\.\s*([^:\n]+?)\s*:\s*', r'\1\n\2. \3\n', pure_text)
+
+    lines = [l.strip() for l in pure_text.split('\n') if l.strip()]
+    final_data = {}; curr_L1 = curr_L2 = curr_L3 = curr_L4 = None; started = False
+    kor_ord = {chr(i): i for i in range(ord('가'), ord('하')+1)}; curr_L3_char = ""
+    kill_pattern = r'[,.]?\s*\d*[.\s]*계\s*속\s*[:;]*\s*$'
+
+    for line in lines:
+        line = line.strip()
+        check_line = re.sub(kill_pattern, '', line).strip()
+        if not started:
+            if re.match(r'^1\.\s*(일반적\s*사항|회사의\s*개요)', check_line): started = True
+            else: continue
+
+        m1 = re.match(r'^(\d+)\s*\.\s*(.*)', check_line)
+        if m1 and m1.group(1).isdigit():
+            num = m1.group(1)
+            if 1 <= int(num) <= 60 and num not in final_data:
+                final_data[num] = {"title": m1.group(2).strip(), "content": "", "tables": [], "sub_sections": {}}
+                curr_L1, curr_L2, curr_L3, curr_L4 = final_data[num], None, None, None
+                curr_L3_char = ""; continue
+        m2 = re.match(r'^(\d+\.\d+)\.?\s+(.*)', check_line)
+        if m2 and curr_L1:
+            key = m2.group(1) 
+            curr_L1["sub_sections"][key] = {"title": m2.group(2).strip(), "content": "", "tables": [], "sub_sections": {}}
+            curr_L2, curr_L3, curr_L4 = curr_L1["sub_sections"][key], None, None
+            curr_L3_char = ""; continue
+        m3 = re.match(r'^([가-하])\s*\.\s+(.*)', check_line)
+        if m3:
+            new_char = m3.group(1)
+            is_restart = (kor_ord.get(new_char, 0) <= kor_ord.get(curr_L3_char, 0)) if curr_L3_char else False
+            if not is_restart:
+                parent = curr_L2 or curr_L1
+                if parent:
+                    key = new_char + "."; orig_key = key; counter = 1
+                    while key in parent["sub_sections"]: key = f"{orig_key}_{counter}"; counter += 1
+                    parent["sub_sections"][key] = {"title": m3.group(2).strip(), "content": "", "tables": [], "sub_sections": {}}
+                    curr_L3, curr_L4, curr_L3_char = parent["sub_sections"][key], None, new_char
+                    continue
+        m4 = re.match(r'^(\(\d+\))\s+(.*)', check_line)
+        if m4:
+            parent = curr_L3 or curr_L2 or curr_L1
+            if parent:
+                key = m4.group(1).strip(); orig_key = key; counter = 1
+                while key in parent["sub_sections"]: key = f"{orig_key}_{counter}"; counter += 1
+                parent["sub_sections"][key] = {"title": m4.group(2).strip(), "content": "", "tables": [], "sub_sections": {}}
+                curr_L4 = parent["sub_sections"][key]; continue
+
+        active_node = curr_L4 or curr_L3 or curr_L2 or curr_L1
+        if active_node:
+            if line in all_captured_footnotes: continue
+            if re.match(r'^계\s*속\s*[:;]*$', line) or re.search(kill_pattern, line): continue
             
-    return {"주석": notes_data}
+            if '[[TABLE_' in line:
+                for part in re.split(r'(\[\[TABLE_\d+\]\])', line):
+                    if part in table_store: active_node["tables"].append(table_store[part])
+                    elif part.strip() and part not in all_captured_footnotes: 
+                        clean_part = re.sub(kill_pattern, '', part).strip()
+                        if clean_part and clean_part != active_node.get("title", ""):
+                            active_node["content"] += " " + clean_part
+            else:
+                if check_line and check_line != active_node.get("title", ""):
+                    active_node["content"] += " " + check_line
+
+    return {"주석": clean_tree(final_data)}
 
 # ==========================================
 # 3. 메인 파이프라인 함수
@@ -316,6 +471,7 @@ def run_pipeline(raw_dir: str, processed_dir: str):
 
         year_data = {year: {}}
 
+        # 기존 파싱 로직들
         year_data[year].update(parse_intro(soup))
         year_data[year].update(extract_financial_statement(tables, "재무상태표", ['유동자산', '유동부채', '이익잉여금']))
         year_data[year].update(extract_financial_statement(tables, "손익계산서", ['매출액', '영업이익', '당기순이익']))
@@ -325,7 +481,8 @@ def run_pipeline(raw_dir: str, processed_dir: str):
         year_data[year].update(parse_appendix(soup))
         
         # 💥 [추가됨] 주석 로직 파이프라인 결합
-        year_data[year].update(parse_notes(soup))
+        # (원본을 건드리지 않기 위해 html_content 문자열을 통째로 넘김)
+        year_data[year].update(parse_complex_notes(html_content))
 
         save_path = os.path.join(processed_dir, f'audit_report_{year}_structured.json')
         with open(save_path, 'w', encoding='utf-8') as f:
@@ -347,7 +504,6 @@ def main() -> None:
     print(f"processed_dir={processed_dir}")
     print("ingest pipeline 파싱을 시작합니다.")
     
-    # Path 객체를 문자열로 변환하여 파이프라인 함수에 전달합니다.
     run_pipeline(str(raw_dir), str(processed_dir))
 
 if __name__ == "__main__":
