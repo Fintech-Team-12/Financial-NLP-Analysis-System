@@ -141,6 +141,17 @@ def html_table_to_dict_notes(table_tag):
 
     df_cleaned = df.map(clean_cell_notes) if hasattr(df, 'map') else df.applymap(clean_cell_notes)
     data_rows = df_cleaned.values.tolist()
+    processed_rows = []
+    for row in data_rows:
+        new_row = []
+        for cell in row:
+            # 숫자처럼 생긴 값만 변환 시도
+            try:
+                val = clean_amount(cell)
+                new_row.append(val)
+            except:
+                new_row.append(cell)
+        processed_rows.append(new_row)
 
     curr_node = table_tag.next_sibling
     search_limit = 10
@@ -165,7 +176,7 @@ def html_table_to_dict_notes(table_tag):
             search_limit -= 1
         curr_node = curr_node.next_sibling
 
-    return {"columns": columns, "rows": data_rows, "annotations": annotations, "captured_texts": captured_texts}
+    return {"columns": columns, "rows": processed_rows, "annotations": annotations, "captured_texts": captured_texts}
 
 def clean_tree(node):
     if isinstance(node, dict):
@@ -640,8 +651,11 @@ def run_pipeline(raw_dir: str, processed_dir: str):
 # 4. 진입점 (기존 뼈대 구조 유지) - 고정
 # ==========================================
 def main() -> None:
-    raw_dir = Path("./data/raw")
-    processed_dir = Path("./data/processed")
+    BASE_DIR = Path(__file__).resolve().parents[3]
+# src → ingest → app → project
+
+    raw_dir = BASE_DIR / "data" / "raw"
+    processed_dir = BASE_DIR / "data" / "processed"
     processed_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"raw_dir={raw_dir}")
