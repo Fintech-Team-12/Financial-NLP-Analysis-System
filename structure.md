@@ -1,4 +1,4 @@
-# Current Structure
+<!-- # Current Structure
 ```bash
 rag_finance_project/
 ├── .github/
@@ -59,21 +59,4 @@ docs	문서 수정에 대한 커밋<br>
 style	코드 스타일 혹은 포맷 등에 관한 커밋<br>
 refactor	코드 리팩토링에 대한 커밋<br>
 test	테스트 코드 수정에 대한 커밋<br>
-perf	성능 개선에 대한 커밋<br>
-
-
-
-# 네트워크 구조
-```bash
-[호스트 머신]
-   ├─ localhost:8501  -> frontend 컨테이너:8501
-   ├─ localhost:8000  -> api 컨테이너:8000
-#    ├─ localhost:8001  -> chroma 컨테이너:8000
-   └─ localhost:11434 -> Ollama (호스트에서 직접 실행 중)
-
-[Docker 내부 네트워크]
-   ├─ frontend  ---HTTP---> api:8000
-   ├─ api       ---HTTP---> chroma:8000
-   ├─ ingest    ---HTTP---> chroma:8000
-   └─ api       ---HTTP---> host.docker.internal:11434
-```
+perf	성능 개선에 대한 커밋<br> -->
