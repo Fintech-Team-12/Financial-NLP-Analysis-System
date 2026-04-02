@@ -39,9 +39,17 @@ jobs:
         run: ruff check app/api/app app/api/tests
 
       - name: Pytest
-        run: pytest app/api/tests --cov=app/api/app --cov-report=term-missing
+        run: pytest app/api/tests --cov=app/api/app --cov-report=term-missing -v
         env:
           PYTHONPATH: app/api
+          MOCK_MODE: "true"   # CI 에서는 항상 mock 모드 (Chroma/Ollama 불필요)
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: .coverage
 
   docker-build:
     runs-on: ubuntu-latest

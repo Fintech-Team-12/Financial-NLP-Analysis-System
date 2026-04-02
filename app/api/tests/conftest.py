@@ -1,0 +1,115 @@
+"""
+pytest 공통 fixture.
+
+sample_data_dir : 실제 데이터 포맷과 동일한 최소 JSON 을 임시 디렉토리에 생성
+reset_store     : 각 테스트 전후 in-memory store 초기화
+client          : DATA_DIR 을 sample_data_dir 로 덮어쓴 TestClient 반환
+"""
+import json
+from pathlib import Path
+from typing import Generator
+
+import pytest
+from fastapi.testclient import TestClient
+
+# ── 실제 processed JSON 과 동일한 포맷의 최소 샘플 ───────────────────────────
+SAMPLE_DATA = {
+    "2023": {
+        "감사보고서": {
+            "title": "감사보고서 본문",
+            "content": "",
+            "tables": [],
+            "sub_sections": {
+                "감사의견": {
+                    "title": "감사의견",
+                    "content": (
+                        "우리의 의견으로는 별첨된 회사의 재무제표는 "
+                        "한국채택국제회계기준에 따라 중요성의 관점에서 공정하게 표시하고 있습니다."
+                    ),
+                    "tables": [],
+                    "sub_sections": {},
+                },
+                "핵심감사사항": {
+                    "title": "핵심감사사항",
+                    "content": "메모리 반도체 재고자산 순실현가치 평가를 핵심감사사항으로 결정하였습니다.",
+                    "tables": [],
+                    "sub_sections": {},
+                },
+            },
+        },
+        "재무상태표": {
+            "title": "재무상태표",
+            "content": "재무상태표입니다.",
+            "tables": [
+                {
+                    "unit": "(단위: 원)",
+                    "columns": ["과목명", "관련주석", "당기금액", "전기금액"],
+                    "rows": [
+                        ["매출채권", ["4", "5", "7"], 27363016000000, 20503223000000],
+                        ["재고자산", ["8"], 29338151000000, 27990007000000],
+                        ["유형자산", ["10"], 140579161000000, 123266986000000],
+                    ],
+                }
+            ],
+        },
+        "주석": {
+            "title": "주석",
+            "content": "",
+            "tables": [],
+            "sub_sections": {
+                "5": {
+                    "title": "매출채권",
+                    "content": (
+                        "매출채권은 최초 인식 시 공정가치로 측정하며, "
+                        "후속적으로 유효이자율법을 사용하여 상각후원가로 측정합니다."
+                    ),
+                    "tables": [],
+                    "sub_sections": {},
+                },
+                "8": {
+                    "title": "재고자산",
+                    "content": "재고자산은 취득원가와 순실현가능가치 중 낮은 금액으로 측정합니다.",
+                    "tables": [],
+                    "sub_sections": {},
+                },
+            },
+        },
+    }
+}
+
+
+@pytest.fixture(scope="session")
+def sample_data_dir(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """세션당 1회 생성되는 임시 JSON 파일 디렉토리."""
+    data_dir: Path = tmp_path_factory.mktemp("data")
+    file_path = data_dir / "audit_report_2023_structured.json"
+    file_path.write_text(json.dumps(SAMPLE_DATA, ensure_ascii=False), encoding="utf-8")
+    return str(data_dir)
+
+
+@pytest.fixture
+def reset_store() -> Generator[None, None, None]:
+    """테스트 전후 in-memory store 초기화."""
+    from app.services import indexing
+    indexing._store.clear()
+    indexing._indexed_years.clear()
+    yield
+    indexing._store.clear()
+    indexing._indexed_years.clear()
+
+
+@pytest.fixture
+def client(sample_data_dir: str, reset_store: None) -> Generator[TestClient, None, None]:
+    """
+    DATA_DIR 을 임시 경로로 오버라이드한 TestClient.
+    reset_store 에 의존 → 항상 빈 store 에서 시작.
+    """
+    from app.core.config import settings
+    original_dir = settings.data_dir
+    settings.data_dir = sample_data_dir
+
+    from app.main import app
+    with TestClient(app) as c:
+        yield c
+
+    settings.data_dir = original_dir
