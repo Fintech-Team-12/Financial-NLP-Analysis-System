@@ -25,7 +25,8 @@ def extract_company_name_from_html(soup):
         name = match.group(1).replace(" ", "")
         name = re.sub(r'\([주유합명자]+\)', '', name) 
         name = re.sub(r'주식회사|유한책임회사|유한회사|합자회사|합명회사', '', name)
-        if name: return name
+        if name: 
+            return name
 
     match = re.search(rf'([가-힣a-zA-Z0-9]+)\s*{corp_full}', head_text)
     if match:
