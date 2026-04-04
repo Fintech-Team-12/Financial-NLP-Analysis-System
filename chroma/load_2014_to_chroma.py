@@ -1,3 +1,8 @@
+from chromadb.utils import embedding_functions
+embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+    model_name="paraphrase-multilingual-MiniLM-L12-v2"
+)
+
 import sqlite3
 import chromadb
 
@@ -10,7 +15,6 @@ conn = sqlite3.connect(DB_PATH)
 conn.row_factory = sqlite3.Row
 cur = conn.cursor()
 
-# 2. 필요한 컬럼만 조회
 cur.execute("""
     SELECT
         chunk_id,
@@ -31,13 +35,23 @@ conn.close()
 
 print(f"가져온 row 수: {len(rows)}")
 
-# 3. Chroma 연결
+# 2. Chroma 연결
 client = chromadb.PersistentClient(path=CHROMA_PATH)
 
-# 4. 컬렉션 만들기
-collection = client.get_or_create_collection(name=COLLECTION_NAME)
+# 3. 기존 컬렉션 삭제
+try:
+    client.delete_collection(name=COLLECTION_NAME)
+    print(f"기존 컬렉션 삭제 완료: {COLLECTION_NAME}")
+except Exception:
+    print("삭제할 기존 컬렉션 없음")
 
-# 5. Chroma에 넣을 데이터 준비
+# 4. 새 컬렉션 생성
+collection = client.get_or_create_collection(
+    name=COLLECTION_NAME,
+    embedding_function=embedding_function
+)
+
+# 5. 데이터 준비
 ids = []
 documents = []
 metadatas = []
@@ -63,13 +77,3 @@ collection.add(
 
 print("Chroma 적재 완료")
 print("컬렉션 문서 수:", collection.count())
-
-# 7. 검색 테스트
-result = collection.query(
-    query_texts=["유형자산"],
-    n_results=3
-)
-
-print(result["ids"])
-print(result["documents"][0][0])
-print(result["metadatas"][0][0])
