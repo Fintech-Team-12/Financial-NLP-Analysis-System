@@ -10,6 +10,46 @@ from pathlib import Path
 # ==========================================
 # 1. 헬퍼 함수 (기존 파이프라인용) - 고정
 # ==========================================
+
+# 회사명 자동 추출 함수
+def extract_company_name_from_html(soup):
+    # 문서의 맨 앞 1000글자 안에서만 찾습니다 (엉뚱한 매칭 방지)
+    full_text = soup.get_text(separator=' ', strip=True)
+    head_text = full_text[:1000] 
+
+    # [추가] 한국의 모든 기업 형태를 포괄하는 패턴 정의
+    corp_full = r'(?:주\s*식|유\s*한|유\s*한\s*책\s*임|합\s*자|합\s*명)\s*회\s*사'
+    corp_short = r'(?:주|유|합자|합명)'
+    
+    # 1. "회 사 명 : 삼성전자" 패턴
+    match = re.search(r'회\s*사\s*명\s*[:：]\s*([가-힣a-zA-Z0-9\s\(주\)]+?)(?=\s|\[|\()', head_text)
+    if match:
+        name = match.group(1).replace(" ", "").replace("(주)", "").replace("주식회사", "")
+        if name: return name
+
+    # 2. "삼성전자 주식회사" 패턴
+    match = re.search(r'([가-힣a-zA-Z0-9]+)\s*주\s*식\s*회\s*사', head_text)
+    if match:
+        return match.group(1).replace(" ", "")
+        
+    # 3. "주식회사 삼성전자" 패턴
+    match = re.search(r'주\s*식\s*회\s*사\s*([가-힣a-zA-Z0-9]+)', head_text)
+    if match:
+        return match.group(1).replace(" ", "")
+        
+    # 4. "삼성전자(주)" 패턴
+    match = re.search(r'([가-힣a-zA-Z0-9]+)\s*\(\s*주\s*\)', head_text)
+    if match:
+        return match.group(1).replace(" ", "")
+        
+    # 5. "(주)삼성전자" 패턴
+    match = re.search(r'\(\s*주\s*\)\s*([가-힣a-zA-Z0-9]+)', head_text)
+    if match:
+        return match.group(1).replace(" ", "")
+
+    return "UnknownCompany"
+
+
 def clean_text(text):
     if not text: return ""
     text = str(text).replace('\n', ' ').replace('\r', ' ')
@@ -97,7 +137,7 @@ def html_table_to_dict(table_tag, columns):
     }
 
 # ==========================================
-# 주석 전용 헬퍼 함수 - 고정
+# 주석 전용 헬퍼 함수 - 고정 (잘못 덮어씌워진 부분 복구)
 # ==========================================
 def html_table_to_dict_notes(table_tag):
     marker_pattern = r'(\(\s*\*+\s*\d+\s*\)|\(\s*\*+.*?\).?|\*+\s*\d+|\(주\s*\d*\)|주\s*\d+\s*[)\.]?|주\s*:)'
@@ -142,6 +182,7 @@ def html_table_to_dict_notes(table_tag):
     df_cleaned = df.map(clean_cell_notes) if hasattr(df, 'map') else df.applymap(clean_cell_notes)
     data_rows = df_cleaned.values.tolist()
     processed_rows = []
+    
     for row in data_rows:
         new_row = []
         for cell in row:
@@ -155,6 +196,7 @@ def html_table_to_dict_notes(table_tag):
 
     curr_node = table_tag.next_sibling
     search_limit = 10
+    
     while curr_node and search_limit > 0:
         if getattr(curr_node, 'name', None) == 'table': break
         node_text = curr_node.get_text(separator=" ", strip=True) if hasattr(curr_node, 'get_text') else str(curr_node).strip()
@@ -202,20 +244,20 @@ def clean_tree(node):
 # 2. 개별 파싱 모듈 함수
 # ==========================================
 
-# 감사보고서 파싱 (문제 1,2 완전 해결 본) - 고정
-def parse_intro(soup):
+#  [수정] 파라미터에 company_name 추가 및 동적 복구 로직 적용
+def parse_intro(soup, company_name="UnknownCompany"):
     pure_text = soup.get_text(separator='\n', strip=True)
     
-
     # DART 특유의 늘여쓰기(자간 벌림) 강제 복구 로직
-    pure_text = re.sub(r'재\s*무\s*제\s*표', '재무제표', pure_text)
-    pure_text = re.sub(r'감\s*사\s*보\s*고\s*서', '감사보고서', pure_text)
-    pure_text = re.sub(r'손\s*익\s*계\s*산\s*서', '손익계산서', pure_text)
-    pure_text = re.sub(r'자\s*본\s*변\s*동\s*표', '자본변동표', pure_text)
-    pure_text = re.sub(r'현\s*금\s*흐\s*름\s*표', '현금흐름표', pure_text)
-    pure_text = re.sub(r'포\s*괄\s*손\s*익\s*계\s*산\s*서', '포괄손익계산서', pure_text)
-    pure_text = re.sub(r'연\s*결', '연결', pure_text)
-    pure_text = re.sub(r'삼\s*성\s*전\s*자', '삼성전자', pure_text)
+    keywords = ['재무제표', '감사보고서', '손익계산서', '자본변동표', '현금흐름표', '포괄손익계산서', '연결']
+    
+    # 추출된 회사명이 있으면 키워드에 추가
+    if company_name != "UnknownCompany":
+        keywords.append(company_name)
+
+    for kw in keywords:
+        pattern = r'\s*'.join(list(kw))
+        pure_text = re.sub(pattern, kw, pure_text)
 
     end_pattern = r'\(\s*첨부\s*\)\s*재\s*무\s*제\s*표|\[\s*첨부\s*\]\s*재\s*무\s*제\s*표|재\s*무\s*상\s*태\s*표\s*제\s*\d+\s*기|연\s*결\s*재\s*무\s*상\s*태\s*표'
     split_by_end = re.split(end_pattern, pure_text)
@@ -331,7 +373,6 @@ def extract_financial_statement(tables, title, keywords, exclude_keywords=None):
                 }
     return {}
 
-# 💥 [핵심 변경] 은정님의 자본변동표수정.py 원본 로직 통째로 이식!
 def extract_equity_statement(tables, title="자본변동표"):
     def clean_event(name):
         if pd.isna(name): return name
@@ -341,7 +382,6 @@ def extract_equity_statement(tables, title="자본변동표"):
     for df in tables:
         df_string = df.to_string().replace(" ", "")
         
-        # 자본변동표 식별 조건 (원본 코드 그대로)
         if ('자본금' in df_string and '이익잉여금' in df_string and 
             ('기말' in df_string or '기초' in df_string or '당기순' in df_string or '배당' in df_string) and
             '유동자산' not in df_string and '매출액' not in df_string):
@@ -362,7 +402,6 @@ def extract_equity_statement(tables, title="자본변동표"):
         else:
             target_df.columns = [str(c).replace(" ", "") for c in target_df.columns]
 
-        # 주석 컬럼 찾기
         note_col = None
         for c in target_df.columns:
             if '주석' in str(c).replace(" ", "") or '비고' in str(c).replace(" ", ""):
@@ -374,13 +413,11 @@ def extract_equity_statement(tables, title="자본변동표"):
         target_df['구분'] = target_df['구분'].apply(clean_event)
         target_df = target_df.dropna(subset=['구분'])
         
-        # 주석 처리 적용
         if note_col:
             target_df['관련주석'] = target_df[note_col].apply(clean_note)
         else:
             target_df['관련주석'] = [[] for _ in range(len(target_df))]
 
-        # 금액 컬럼만 따로 필터링
         val_cols = [c for c in target_df.columns if c not in ['구분', note_col, '관련주석']]
         
         for col in val_cols:
@@ -389,7 +426,6 @@ def extract_equity_statement(tables, title="자본변동표"):
         processed_records = []
         current_parent = "기초 및 기말 잔액"
 
-        # 레코드 생성 (금액 100만 배 처리 포함)
         for _, row in target_df.iterrows():
             event_name = row['구분']
             
@@ -418,13 +454,12 @@ def extract_equity_statement(tables, title="자본변동표"):
                     if pd.isna(val):
                         record[c] = 0
                     elif isinstance(val, (int, float)):
-                        record[c] = int(val * 1000000) # 정수로 깔끔하게 100만 배
+                        record[c] = int(val * 1000000)
                     else:
                         record[c] = val
                     
                 processed_records.append(record)
         
-        # 리스트(딕셔너리) 형태를 Master JSON 스키마 구조로 변환
         final_columns = ["상위구분", "구분", "관련주석"] + val_cols
         
         table_rows = []
@@ -449,7 +484,6 @@ def extract_equity_statement(tables, title="자본변동표"):
         }
     return {}
 
-# 부록 함수 - 고정
 def parse_appendix(soup):
     appendix_data = {
         "title": "감사보고서 부록",
@@ -500,9 +534,6 @@ def parse_appendix(soup):
         
     return {"부록": appendix_data}
 
-# ==========================================
-# 주석 파싱 모듈 - 고정
-# ==========================================
 def parse_complex_notes(html_content):
     soup = BeautifulSoup(re.sub(r'\r?\n', '', html_content), 'html.parser')
     for tag in soup.find_all(['span', 'font', 'b', 'strong', 'i', 'em', 'u']): tag.unwrap()
@@ -609,7 +640,6 @@ def run_pipeline(raw_dir: str, processed_dir: str):
     for file_path in file_list:
         year_match = re.search(r'20\d{2}', os.path.basename(file_path))
         year = year_match.group() if year_match else "Unknown"
-        print(f"[{year}년] {os.path.basename(file_path)} 처리 중...")
         
         try:
             with open(file_path, 'r', encoding='cp949') as f: html_content = f.read()
@@ -622,24 +652,26 @@ def run_pipeline(raw_dir: str, processed_dir: str):
         except ValueError:
             tables = []
 
-        year_data = {year: {}}
+        # [추가] 회사명 자동 추출
+        company_name = extract_company_name_from_html(soup)
+        print(f"[{year}년] {os.path.basename(file_path)} 처리 중... (자동인식 회사명: {company_name})")
 
-        year_data[year].update(parse_intro(soup))
+        # [수정] JSON 스키마에 회사명 메타데이터 추가
+        year_data = {year: {"company": company_name}}
+
+        # [수정] 추출한 회사명을 parse_intro에 전달
+        year_data[year].update(parse_intro(soup, company_name=company_name))
         
-        # 💥 [핵심 변경] 은정님의 포괄손익계산서 키워드 반영 (기타포괄, 총포괄, 매출액 제외)
         year_data[year].update(extract_financial_statement(tables, "재무상태표", ['유동자산', '유동부채', '이익잉여금'], exclude_keywords=['자본변동표', '손익계산서']))
         year_data[year].update(extract_financial_statement(tables, "손익계산서", ['매출액', '영업이익', '당기순이익'], exclude_keywords=['총포괄손익', '포괄손익계산서', '자본변동표']))
         year_data[year].update(extract_financial_statement(tables, "포괄손익계산서", ['기타포괄', '총포괄'], exclude_keywords=['매출액', '자본금', '자본변동표']))
-        
-        # 💥 [핵심 변경] 자본변동표는 이식된 전용 함수로 호출
         year_data[year].update(extract_equity_statement(tables, "자본변동표"))
-        
         year_data[year].update(extract_financial_statement(tables, "현금흐름표", ['영업활동현금흐름', '투자활동현금흐름'], exclude_keywords=[]))
-        
         year_data[year].update(parse_appendix(soup))
         year_data[year].update(parse_complex_notes(html_content))
 
-        save_path = os.path.join(processed_dir, f'samsung_audit_report_{year}_structured.json')
+        # [수정] 저장 파일명에 회사명을 동적으로 반영 (삼성전자 하드코딩 제거)
+        save_path = os.path.join(processed_dir, f'{company_name}_audit_report_{year}_structured.json')
         with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(year_data, f, ensure_ascii=False, indent=4)
             
@@ -652,7 +684,6 @@ def run_pipeline(raw_dir: str, processed_dir: str):
 # ==========================================
 def main() -> None:
     BASE_DIR = Path(__file__).resolve().parents[3]
-# src → ingest → app → project
 
     raw_dir = BASE_DIR / "data" / "raw"
     processed_dir = BASE_DIR / "data" / "processed"
