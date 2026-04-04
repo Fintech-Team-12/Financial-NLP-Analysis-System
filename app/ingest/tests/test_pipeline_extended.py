@@ -18,45 +18,55 @@ from src.pipeline import (
 
 TEST_DATA_DIR = Path(__file__).parent / "test_data" / "raw"
 
+
 # ==========================================
 # 1. 단위 테스트: 데이터 정제 헬퍼 함수 검증
 # ==========================================
-@pytest.mark.parametrize("raw, expected", [
-    ("1,234,567", 1234567),
-    ("(500)", -500),
-    ("-", 0),
-    ("", 0),
-    (np.nan, 0),
-    ("1,234.0", 1234),
-    ("(1,234.0)", -1234),
-    ("  1,234  ", 1234),
-    ("N/A", "N/A"),
-])
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("1,234,567", 1234567),
+        ("(500)", -500),
+        ("-", 0),
+        ("", 0),
+        (np.nan, 0),
+        ("1,234.0", 1234),
+        ("(1,234.0)", -1234),
+        ("  1,234  ", 1234),
+        ("N/A", "N/A"),
+    ],
+)
 def test_clean_amount(raw, expected):
     assert clean_amount(raw) == expected
 
 
-@pytest.mark.parametrize("raw, expected", [
-    ("Ⅰ. 유 동 자 산", "유동자산"),
-    ("1. 매출액", "매출액"),
-    ("  이 익 잉 여 금  ", "이익잉여금"),
-    ("Ⅱ. 자 본 금", "자본금"),
-    ("10. 당 기 순 이 익", "당기순이익"),
-])
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("Ⅰ. 유 동 자 산", "유동자산"),
+        ("1. 매출액", "매출액"),
+        ("  이 익 잉 여 금  ", "이익잉여금"),
+        ("Ⅱ. 자 본 금", "자본금"),
+        ("10. 당 기 순 이 익", "당기순이익"),
+    ],
+)
 def test_clean_account(raw, expected):
     assert clean_account(raw) == expected
 
 
-@pytest.mark.parametrize("raw, expected", [
-    ("(주석 13, 14 참조)", ['13', '14']),
-    ("nan", []),
-    (np.nan, []),
-    ("주석 1", ['1']),
-    ("(주 12)", ['12']),
-    ("1, 2, 15", ['1', '2', '15']),
-    ("해당없음", []),
-    ("주석 없음", []),
-])
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("(주석 13, 14 참조)", ["13", "14"]),
+        ("nan", []),
+        (np.nan, []),
+        ("주석 1", ["1"]),
+        ("(주 12)", ["12"]),
+        ("1, 2, 15", ["1", "2", "15"]),
+        ("해당없음", []),
+        ("주석 없음", []),
+    ],
+)
 def test_clean_note(raw, expected):
     assert clean_note(raw) == expected
 
@@ -65,23 +75,23 @@ def test_clean_note(raw, expected):
 # 2. 모의(Mock) 데이터 테스트: 재무제표 추출 로직 검증
 # ==========================================
 def test_extract_financial_statement_exclude_keywords():
-    df_is = pd.DataFrame([
-        ["매출액", "100", "50"],
-        ["당기순이익", "10", "5"]
-    ], columns=["과목명", "당기", "전기"])
+    df_is = pd.DataFrame(
+        [["매출액", "100", "50"], ["당기순이익", "10", "5"]],
+        columns=["과목명", "당기", "전기"],
+    )
 
-    df_cis = pd.DataFrame([
-        ["당기순이익", "10", "5"],
-        ["총포괄손익", "12", "6"]
-    ], columns=["과목명", "당기", "전기"])
+    df_cis = pd.DataFrame(
+        [["당기순이익", "10", "5"], ["총포괄손익", "12", "6"]],
+        columns=["과목명", "당기", "전기"],
+    )
 
     tables = [df_is, df_cis]
 
     result = extract_financial_statement(
         tables,
         title="포괄손익계산서",
-        keywords=['당기순이익', '총포괄손익'],
-        exclude_keywords=['매출액']
+        keywords=["당기순이익", "총포괄손익"],
+        exclude_keywords=["매출액"],
     )
 
     assert "포괄손익계산서" in result
@@ -91,16 +101,17 @@ def test_extract_financial_statement_exclude_keywords():
 
 
 def test_extract_financial_statement_without_note_column():
-    df_bs = pd.DataFrame([
-        ["유동자산", "100", "80"],
-        ["유동부채", "40", "30"],
-        ["이익잉여금", "20", "10"],
-    ], columns=["과목명", "당기", "전기"])
+    df_bs = pd.DataFrame(
+        [
+            ["유동자산", "100", "80"],
+            ["유동부채", "40", "30"],
+            ["이익잉여금", "20", "10"],
+        ],
+        columns=["과목명", "당기", "전기"],
+    )
 
     result = extract_financial_statement(
-        [df_bs],
-        title="재무상태표",
-        keywords=["유동자산", "유동부채", "이익잉여금"]
+        [df_bs], title="재무상태표", keywords=["유동자산", "유동부채", "이익잉여금"]
     )
 
     assert "재무상태표" in result
@@ -112,16 +123,17 @@ def test_extract_financial_statement_without_note_column():
 
 
 def test_extract_financial_statement_with_note_column():
-    df_is = pd.DataFrame([
-        ["매출액", "주석 1", "100", "80"],
-        ["영업이익", "주석 2", "30", "20"],
-        ["당기순이익", "주석 3", "10", "5"],
-    ], columns=["과목명", "주석", "당기", "전기"])
+    df_is = pd.DataFrame(
+        [
+            ["매출액", "주석 1", "100", "80"],
+            ["영업이익", "주석 2", "30", "20"],
+            ["당기순이익", "주석 3", "10", "5"],
+        ],
+        columns=["과목명", "주석", "당기", "전기"],
+    )
 
     result = extract_financial_statement(
-        [df_is],
-        title="손익계산서",
-        keywords=["매출액", "영업이익", "당기순이익"]
+        [df_is], title="손익계산서", keywords=["매출액", "영업이익", "당기순이익"]
     )
 
     assert "손익계산서" in result
@@ -133,16 +145,17 @@ def test_extract_financial_statement_with_note_column():
 
 
 def test_extract_financial_statement_four_value_columns():
-    df_is = pd.DataFrame([
-        ["매출액", None, "100", None, "80"],
-        ["영업이익", "30", None, "20", None],
-        ["당기순이익", None, "10", None, "5"],
-    ], columns=["과목명", "당기1", "당기2", "전기1", "전기2"])
+    df_is = pd.DataFrame(
+        [
+            ["매출액", None, "100", None, "80"],
+            ["영업이익", "30", None, "20", None],
+            ["당기순이익", None, "10", None, "5"],
+        ],
+        columns=["과목명", "당기1", "당기2", "전기1", "전기2"],
+    )
 
     result = extract_financial_statement(
-        [df_is],
-        title="손익계산서",
-        keywords=["매출액", "영업이익", "당기순이익"]
+        [df_is], title="손익계산서", keywords=["매출액", "영업이익", "당기순이익"]
     )
 
     assert "손익계산서" in result
@@ -157,29 +170,26 @@ def test_extract_financial_statement_four_value_columns():
 
 
 def test_extract_financial_statement_returns_empty_when_no_match():
-    df = pd.DataFrame([
-        ["자산", "100", "80"]
-    ], columns=["과목명", "당기", "전기"])
+    df = pd.DataFrame([["자산", "100", "80"]], columns=["과목명", "당기", "전기"])
 
     result = extract_financial_statement(
-        [df],
-        title="재무상태표",
-        keywords=["유동자산", "유동부채", "이익잉여금"]
+        [df], title="재무상태표", keywords=["유동자산", "유동부채", "이익잉여금"]
     )
 
     assert result == {}
 
 
 def test_extract_financial_statement_adjust_unit_exception_cases():
-    df = pd.DataFrame([
-        ["주당순이익", "1.5", "1.2"],
-        ["법인세비용차감후주당순이익", "2.0", "1.8"],
-    ], columns=["과목명", "당기", "전기"])
+    df = pd.DataFrame(
+        [
+            ["주당순이익", "1.5", "1.2"],
+            ["법인세비용차감후주당순이익", "2.0", "1.8"],
+        ],
+        columns=["과목명", "당기", "전기"],
+    )
 
     result = extract_financial_statement(
-        [df],
-        title="주당이익표",
-        keywords=["주당순이익"]
+        [df], title="주당이익표", keywords=["주당순이익"]
     )
 
     assert "주당이익표" in result
@@ -195,10 +205,10 @@ def test_extract_financial_statement_adjust_unit_exception_cases():
 # 3. 모의(Mock) 데이터 테스트: 자본변동표 검증
 # ==========================================
 def test_extract_equity_statement_nan_handling():
-    df_eq = pd.DataFrame([
-        ["기초자본", 100.0, np.nan],
-        ["당기순이익", 50.0, 20.0]
-    ], columns=["자본금", "이익잉여금", "자본총계"])
+    df_eq = pd.DataFrame(
+        [["기초자본", 100.0, np.nan], ["당기순이익", 50.0, 20.0]],
+        columns=["자본금", "이익잉여금", "자본총계"],
+    )
 
     tables = [df_eq]
 
@@ -213,11 +223,14 @@ def test_extract_equity_statement_nan_handling():
 
 
 def test_extract_equity_statement_balance_keywords():
-    df_eq = pd.DataFrame([
-        ["기초자본", 100, 200, 300],
-        ["당기순이익", 0, 50, 50],
-        ["기말자본", 100, 250, 350],
-    ], columns=["구분", "자본금", "이익잉여금", "자본총계"])
+    df_eq = pd.DataFrame(
+        [
+            ["기초자본", 100, 200, 300],
+            ["당기순이익", 0, 50, 50],
+            ["기말자본", 100, 250, 350],
+        ],
+        columns=["구분", "자본금", "이익잉여금", "자본총계"],
+    )
 
     tables = [df_eq]
 
@@ -231,11 +244,14 @@ def test_extract_equity_statement_balance_keywords():
 
 
 def test_extract_equity_statement_parent_grouping():
-    df_eq = pd.DataFrame([
-        ["기타 변동", 0, 0, 0],
-        ["당기순이익", 0, 10, 10],
-        ["배당", 0, -5, -5],
-    ], columns=["구분", "자본금", "이익잉여금", "자본총계"])
+    df_eq = pd.DataFrame(
+        [
+            ["기타 변동", 0, 0, 0],
+            ["당기순이익", 0, 10, 10],
+            ["배당", 0, -5, -5],
+        ],
+        columns=["구분", "자본금", "이익잉여금", "자본총계"],
+    )
 
     tables = [df_eq]
 
@@ -249,10 +265,13 @@ def test_extract_equity_statement_parent_grouping():
 
 
 def test_extract_equity_statement_with_note_column():
-    df_eq = pd.DataFrame([
-        ["당기순이익", "주석 10", 0, 50, 50],
-        ["배당", "주석 12", 0, -10, -10],
-    ], columns=["구분", "주석", "자본금", "이익잉여금", "자본총계"])
+    df_eq = pd.DataFrame(
+        [
+            ["당기순이익", "주석 10", 0, 50, 50],
+            ["배당", "주석 12", 0, -10, -10],
+        ],
+        columns=["구분", "주석", "자본금", "이익잉여금", "자본총계"],
+    )
 
     tables = [df_eq]
 
@@ -266,10 +285,13 @@ def test_extract_equity_statement_with_note_column():
 
 
 def test_extract_equity_statement_returns_empty_when_no_match():
-    df = pd.DataFrame([
-        ["유동자산", 100, 200],
-        ["유동부채", 50, 60],
-    ], columns=["과목명", "당기", "전기"])
+    df = pd.DataFrame(
+        [
+            ["유동자산", 100, 200],
+            ["유동부채", 50, 60],
+        ],
+        columns=["과목명", "당기", "전기"],
+    )
 
     result = extract_equity_statement([df], title="자본변동표")
 
@@ -311,6 +333,7 @@ def assert_section_schema(section):
     assert "tables" in section
     assert "sub_sections" in section
 
+
 def assert_note_section_schema(section):
     assert "title" in section
     assert "content" in section
@@ -322,6 +345,8 @@ def assert_note_section_schema(section):
         assert isinstance(section["tables"], list)
     if "sub_sections" in section:
         assert isinstance(section["sub_sections"], dict)
+
+
 def assert_table_schema(table):
     assert "unit" in table
     assert "columns" in table
@@ -337,14 +362,16 @@ def test_full_pipeline_with_real_file(tmp_path):
 
     test_files = list(TEST_DATA_DIR.glob("*.htm*"))
     if not test_files:
-        pytest.skip(f"테스트 중단: {TEST_DATA_DIR} 폴더에 HTML 파일이 없습니다. 파일을 하나 넣어주세요!")
+        pytest.skip(
+            f"테스트 중단: {TEST_DATA_DIR} 폴더에 HTML 파일이 없습니다. 파일을 하나 넣어주세요!"
+        )
 
     run_pipeline(str(TEST_DATA_DIR), str(tmp_path))
 
     output_files = list(tmp_path.glob("*.json"))
     assert len(output_files) > 0, "에러: JSON 결과 파일이 생성되지 않았습니다!"
 
-    with open(output_files[0], 'r', encoding='utf-8') as f:
+    with open(output_files[0], "r", encoding="utf-8") as f:
         data = json.load(f)
 
     year_key = list(data.keys())[0]
@@ -358,7 +385,14 @@ def test_full_pipeline_with_real_file(tmp_path):
     assert "부록" in year_data, "'부록' 섹션이 누락되었습니다."
     assert "주석" in year_data, "'주석' 섹션이 누락되었습니다."
 
-    for section_name in ["감사보고서", "재무상태표", "손익계산서", "포괄손익계산서", "자본변동표", "부록"]:
+    for section_name in [
+        "감사보고서",
+        "재무상태표",
+        "손익계산서",
+        "포괄손익계산서",
+        "자본변동표",
+        "부록",
+    ]:
         assert_section_schema(year_data[section_name])
     # 주석은 구조가 다르므로 별도 검증
     notes = year_data["주석"]
@@ -371,13 +405,17 @@ def test_full_pipeline_with_real_file(tmp_path):
     first_note = notes[first_key]
 
     assert_note_section_schema(first_note)
-    assert "도입부" in year_data["감사보고서"]["sub_sections"], "도입부 텍스트가 추출되지 않았습니다."
+    assert "도입부" in year_data["감사보고서"]["sub_sections"], (
+        "도입부 텍스트가 추출되지 않았습니다."
+    )
 
     cis_tables = year_data["포괄손익계산서"].get("tables", [])
     if cis_tables:
         assert_table_schema(cis_tables[0])
         table_content_str = str(cis_tables[0]["rows"])
-        assert "포괄" in table_content_str, "포괄손익계산서 표 내용이 비정상적입니다 (표 섞임 의심)."
+        assert "포괄" in table_content_str, (
+            "포괄손익계산서 표 내용이 비정상적입니다 (표 섞임 의심)."
+        )
 
 
 # ==========================================
