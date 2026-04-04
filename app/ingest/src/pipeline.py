@@ -1,9 +1,9 @@
 import pandas as pd
 import io
 import re
-import os
 import glob
 import json
+import os
 from bs4 import BeautifulSoup
 from pathlib import Path
 
@@ -14,42 +14,32 @@ from pathlib import Path
 
 # 회사명 자동 추출 함수
 def extract_company_name_from_html(soup):
-    # 문서의 맨 앞 1000글자 안에서만 찾습니다 (엉뚱한 매칭 방지)
-    full_text = soup.get_text(separator=" ", strip=True)
-    head_text = full_text[:1000]
+    full_text = soup.get_text(separator=' ', strip=True)
+    head_text = full_text[:1000] 
 
-    # [추가] 한국의 모든 기업 형태를 포괄하는 패턴 정의
-    corp_full = r"(?:주\s*식|유\s*한|유\s*한\s*책\s*임|합\s*자|합\s*명)\s*회\s*사"
-    corp_short = r"(?:주|유|합자|합명)"
-
-    # 1. "회 사 명 : 삼성전자" 패턴
-    match = re.search(
-        r"회\s*사\s*명\s*[:：]\s*([가-힣a-zA-Z0-9\s\(주\)]+?)(?=\s|\[|\()", head_text
-    )
+    corp_full = r'(?:주\s*식|유\s*한|유\s*한\s*책\s*임|합\s*자|합\s*명)\s*회\s*사'
+    corp_short = r'(?:주|유|합자|합명)'
+    
+    match = re.search(r'회\s*사\s*명\s*[:：]\s*([가-힣a-zA-Z0-9\s\(주\)]+?)(?=\s|\[|\()', head_text)
     if match:
-        name = (
-            match.group(1).replace(" ", "").replace("(주)", "").replace("주식회사", "")
-        )
-        if name:
-            return name
+        name = match.group(1).replace(" ", "")
+        name = re.sub(r'\([주유합명자]+\)', '', name) 
+        name = re.sub(r'주식회사|유한책임회사|유한회사|합자회사|합명회사', '', name)
+        if name: return name
 
-    # 2. "삼성전자 주식회사" 패턴
-    match = re.search(r"([가-힣a-zA-Z0-9]+)\s*주\s*식\s*회\s*사", head_text)
+    match = re.search(rf'([가-힣a-zA-Z0-9]+)\s*{corp_full}', head_text)
     if match:
         return match.group(1).replace(" ", "")
-
-    # 3. "주식회사 삼성전자" 패턴
-    match = re.search(r"주\s*식\s*회\s*사\s*([가-힣a-zA-Z0-9]+)", head_text)
+        
+    match = re.search(rf'{corp_full}\s*([가-힣a-zA-Z0-9]+)', head_text)
     if match:
         return match.group(1).replace(" ", "")
-
-    # 4. "삼성전자(주)" 패턴
-    match = re.search(r"([가-힣a-zA-Z0-9]+)\s*\(\s*주\s*\)", head_text)
+        
+    match = re.search(rf'([가-힣a-zA-Z0-9]+)\s*\(\s*{corp_short}\s*\)', head_text)
     if match:
         return match.group(1).replace(" ", "")
-
-    # 5. "(주)삼성전자" 패턴
-    match = re.search(r"\(\s*주\s*\)\s*([가-힣a-zA-Z0-9]+)", head_text)
+        
+    match = re.search(rf'\(\s*{corp_short}\s*\)\s*([가-힣a-zA-Z0-9]+)', head_text)
     if match:
         return match.group(1).replace(" ", "")
 
@@ -196,7 +186,7 @@ def html_table_to_dict_notes(table_tag):
         if not dfs:
             return None
         df = dfs[0]
-    except:
+    except Exception:
         return None
 
     columns = (
@@ -243,7 +233,7 @@ def html_table_to_dict_notes(table_tag):
             try:
                 val = clean_amount(cell)
                 new_row.append(val)
-            except:
+            except Exception:
                 new_row.append(cell)
         processed_rows.append(new_row)
 
@@ -776,7 +766,7 @@ def parse_complex_notes(html_content):
         r"(\.)\s*(\d{1,2})\s*\.\s*([^:\n]+?)\s*:\s*", r"\1\n\2. \3\n", pure_text
     )
 
-    lines = [l.strip() for l in pure_text.split("\n") if l.strip()]
+    lines = [line.strip() for line in pure_text.split("\n") if line.strip()]
     final_data = {}
     curr_L1 = curr_L2 = curr_L3 = curr_L4 = None
     started = False
