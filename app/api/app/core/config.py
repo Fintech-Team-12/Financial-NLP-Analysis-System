@@ -18,11 +18,24 @@ class Settings:
     # False → ChromaRetriever + OllamaGenerator (담당자 구현 후 교체)
     mock_mode: bool = os.getenv("MOCK_MODE", "true").lower() == "true"
 
-    # ── ChromaDB 연결 (mock_mode=False 일 때 사용) ────────────────────────────
-    # docker-compose.yml: chroma 서비스가 CHROMA_HOST=chroma, CHROMA_PORT=8000
+    # ── ChromaDB — PersistentClient 경로 (현재 사용) ──────────────────────────
+    # 팀원 chroma/load_*.py 가 "./chroma_store" 에 적재.
+    # 백엔드는 동일 경로를 읽기 전용으로 사용하는 것이 원칙.
+    # Docker: WORKDIR=/workspace → /workspace/chroma_store
+    chroma_persist_path: str = os.getenv("CHROMA_PERSIST_PATH", "chroma_store")
+
+    # enriched JSON 위치 — POST /vector/index (비상 재적재 용도) 에서만 사용
+    # 팀원 enrich_flattened_for_rag.py 출력 디렉토리와 동일
+    chroma_enriched_data_dir: str = os.getenv(
+        "CHROMA_ENRICHED_DATA_DIR", "chroma/enriched_data"
+    )
+
+    # ── ChromaDB — HTTP 클라이언트 (미래 확장, 현재 미사용) ─────────────────
+    # docker-compose 에서 Chroma 를 별도 서비스로 분리할 때 사용 예정.
+    # 현재 vector_store.py 는 PersistentClient 만 사용.
     chroma_host: str = os.getenv("CHROMA_HOST", "localhost")
     chroma_port: int = int(os.getenv("CHROMA_PORT", "8000"))
-    chroma_collection: str = os.getenv("CHROMA_COLLECTION", "audit_reports")
+    # NOTE: 컬렉션은 연도별로 "audit_reports_{year}" 형식. 단일 컬렉션명 변수 없음.
 
     # ── Ollama 연결 (mock_mode=False 일 때 사용) ─────────────────────────────
     # docker-compose.yml: OLLAMA_BASE_URL=http://host.docker.internal:11434

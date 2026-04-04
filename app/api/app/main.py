@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.routes import health, ingest, qa
+from app.routes import health, ingest, qa, vector
 
 
 @asynccontextmanager
@@ -24,3 +24,4 @@ app = FastAPI(
 app.include_router(health.router, tags=["system"])
 app.include_router(ingest.router, tags=["ingest"])
 app.include_router(qa.router, tags=["qa"])
+app.include_router(vector.router, tags=["vector"])
