@@ -352,33 +352,50 @@ def make_item_canonical_key(rec: dict) -> str:
 # =========================================================
 # embedding text
 # =========================================================
+def clean_field(value) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if text.lower() == "none":
+        return ""
+    return text
+
+
 def build_text_for_embedding(rec: dict) -> str:
-    year = str(rec.get("year", "")).strip()
-    company = str(rec.get("company", "")).strip()
-    report_type = str(rec.get("report_type", "")).strip()
-    top_section = str(rec.get("top_section", "")).strip()
-    section_title = str(rec.get("section_title", "")).strip()
-    note_number = str(rec.get("note_number", "")).strip()
-    content_text = str(rec.get("content_text", "")).strip()
-    content_type = str(rec.get("content_type", "")).strip()
-    amount_unit = str(rec.get("amount_unit", "") or "").strip()
+    year = clean_field(rec.get("year", ""))
+    company = clean_field(rec.get("company", ""))
+    report_type = clean_field(rec.get("report_type", ""))
+    top_section = clean_field(rec.get("top_section", ""))
+    section_title = clean_field(rec.get("section_title", ""))
+    note_number = clean_field(rec.get("note_number", ""))
+    content_text = clean_field(rec.get("content_text", ""))
+    content_type = clean_field(rec.get("content_type", ""))
+    amount_unit = clean_field(rec.get("amount_unit", ""))
     section_path = normalize_path(rec.get("section_path", ""))
 
+    # 핵심 제목을 맨 앞에 두기
     header_parts = []
-    if year:
-        header_parts.append(f"{year}년")
-    if company:
-        header_parts.append(company)
-    if report_type:
-        header_parts.append(report_type)
-    if top_section:
-        header_parts.append(top_section)
-    if note_number:
-        header_parts.append(f"주석 {note_number}")
-    if section_title and section_title != top_section:
+
+    if section_title:
         header_parts.append(section_title)
 
-    prefix = f"[{' '.join(header_parts)}]"
+    if note_number:
+        header_parts.append(f"주석 {note_number}")
+
+    if company:
+        header_parts.append(company)
+
+    if year:
+        header_parts.append(f"{year}년")
+
+    if report_type:
+        header_parts.append(report_type)
+
+    # top_section은 section_title과 다를 때만 보조적으로
+    if top_section and top_section != section_title:
+        header_parts.append(top_section)
+
+    prefix = " | ".join(header_parts)
 
     meta_parts = []
     if section_path:
@@ -388,13 +405,15 @@ def build_text_for_embedding(rec: dict) -> str:
     if amount_unit:
         meta_parts.append(f"단위: {amount_unit}")
 
-    pieces = [prefix]
+    pieces = []
+    if prefix:
+        pieces.append(prefix)
     if meta_parts:
         pieces.append(" | ".join(meta_parts))
     if content_text:
         pieces.append(content_text)
 
-    return " ".join(pieces).strip()
+    return "\n".join(pieces).strip()
 
 
 # =========================================================
