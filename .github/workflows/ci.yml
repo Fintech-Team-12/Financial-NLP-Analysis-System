@@ -26,7 +26,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('app/api/requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ hashFiles('app/api/requirements.txt', 'app/ingest/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
@@ -34,14 +34,26 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r app/api/requirements.txt
+          pip install -r app/ingest/requirements.txt
+          pip install ruff pytest-cov
 
-      - name: Ruff
+      - name: Ruff API
         run: ruff check app/api/app app/api/tests
+        
+      - name: Ruff Ingest
+        run: ruff check app/ingest/src app/ingest/tests
 
-      - name: Pytest
+
+      - name: Pytest API
         run: pytest app/api/tests --cov=app/api/app --cov-report=term-missing
         env:
           PYTHONPATH: app/api
+
+      - name: Pytest Ingest
+        run: |
+          pytest app/ingest/tests --cov=app/ingest/src --cov-report=term-missing
+        env:
+          PYTHONPATH: app/ingest
 
   docker-build:
     runs-on: ubuntu-latest
