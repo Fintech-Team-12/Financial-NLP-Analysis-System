@@ -361,7 +361,47 @@ def clean_field(value) -> str:
     return text
 
 
-def build_text_for_embedding(rec: dict) -> str:
+def infer_text_type(rec: dict) -> str:
+    top_section = clean_field(rec.get("top_section", ""))
+    section_title = clean_field(rec.get("section_title", ""))
+    section_level = rec.get("section_level")
+
+    if top_section == "감사보고서":
+        return "감사보고서 본문형"
+
+    if top_section in ["재무상태표", "손익계산서", "포괄손익계산서", "자본변동표", "현금흐름표"]:
+        return "재무제표 설명형"
+
+    if top_section == "주석":
+        if section_level == 1 or section_title == "주석":
+            return "주석 상위요약형"
+        return "주석 설명형"
+
+    if top_section == "부록":
+        return "부록 설명형"
+
+    return "일반 설명형"
+
+def infer_table_type(rec: dict) -> str:
+    top_section = clean_field(rec.get("top_section", ""))
+    section_level = rec.get("section_level")
+    note_number = clean_field(rec.get("note_number", ""))
+
+    # 대표 재무제표 표
+    if top_section in ["재무상태표", "손익계산서", "포괄손익계산서", "자본변동표", "현금흐름표"] and section_level == 1:
+        return "대표 재무제표 표"
+
+    # 주석 표
+    if top_section == "주석":
+        return "주석 표"
+
+    # 부록 표
+    if top_section == "부록":
+        return "부록 표"
+
+    return "일반 표"
+
+def build_table_text_for_embedding(rec: dict) -> str:
     year = clean_field(rec.get("year", ""))
     company = clean_field(rec.get("company", ""))
     report_type = clean_field(rec.get("report_type", ""))
@@ -373,11 +413,19 @@ def build_text_for_embedding(rec: dict) -> str:
     amount_unit = clean_field(rec.get("amount_unit", ""))
     section_path = normalize_path(rec.get("section_path", ""))
 
-    # 핵심 제목을 맨 앞에 두기
+    table_type = infer_table_type(rec)
+
     header_parts = []
+
+    # 표 타입을 제일 앞에 넣어서 대표성 강조
+    if table_type:
+        header_parts.append(table_type)
 
     if section_title:
         header_parts.append(section_title)
+
+    if top_section and top_section not in header_parts:
+        header_parts.append(top_section)
 
     if note_number:
         header_parts.append(f"주석 {note_number}")
@@ -391,11 +439,7 @@ def build_text_for_embedding(rec: dict) -> str:
     if report_type:
         header_parts.append(report_type)
 
-    # top_section은 section_title과 다를 때만 보조적으로
-    if top_section and top_section != section_title:
-        header_parts.append(top_section)
-
-    prefix = " | ".join(header_parts)
+    header = " | ".join([p for p in header_parts if p])
 
     meta_parts = []
     if section_path:
@@ -406,8 +450,8 @@ def build_text_for_embedding(rec: dict) -> str:
         meta_parts.append(f"단위: {amount_unit}")
 
     pieces = []
-    if prefix:
-        pieces.append(prefix)
+    if header:
+        pieces.append(header)
     if meta_parts:
         pieces.append(" | ".join(meta_parts))
     if content_text:
@@ -415,6 +459,65 @@ def build_text_for_embedding(rec: dict) -> str:
 
     return "\n".join(pieces).strip()
 
+def build_text_for_embedding(rec: dict) -> str:
+    year = clean_field(rec.get("year", ""))
+    company = clean_field(rec.get("company", ""))
+    report_type = clean_field(rec.get("report_type", ""))
+    top_section = clean_field(rec.get("top_section", ""))
+    section_title = clean_field(rec.get("section_title", ""))
+    note_number = clean_field(rec.get("note_number", ""))
+    content_text = clean_field(rec.get("content_text", ""))
+    content_type = clean_field(rec.get("content_type", ""))
+    amount_unit = clean_field(rec.get("amount_unit", ""))
+    section_path = normalize_path(rec.get("section_path", ""))
+
+    text_type = infer_text_type(rec)
+
+    header_parts = []
+
+    # 제목을 맨 앞에
+    if section_title:
+        header_parts.append(section_title)
+
+    # 문서 성격 강조
+    if text_type:
+        header_parts.append(text_type)
+
+    # 재무제표 계열이면 top_section도 강조
+    if top_section and top_section not in header_parts:
+        header_parts.append(top_section)
+
+    if note_number:
+        header_parts.append(f"주석 {note_number}")
+
+    if company:
+        header_parts.append(company)
+
+    if year:
+        header_parts.append(f"{year}년")
+
+    if report_type:
+        header_parts.append(report_type)
+
+    header = " | ".join([p for p in header_parts if p])
+
+    meta_parts = []
+    if section_path:
+        meta_parts.append(f"경로: {section_path}")
+    if content_type:
+        meta_parts.append(f"유형: {content_type}")
+    if amount_unit:
+        meta_parts.append(f"단위: {amount_unit}")
+
+    pieces = []
+    if header:
+        pieces.append(header)
+    if meta_parts:
+        pieces.append(" | ".join(meta_parts))
+    if content_text:
+        pieces.append(content_text)
+
+    return "\n".join(pieces).strip()
 
 # =========================================================
 # 메인 enrich
@@ -463,7 +566,15 @@ def enrich_records(records: list[dict]) -> list[dict]:
         new_rec["has_table"] = cleaned_table is not None
         new_rec["item_canonical_key"] = make_item_canonical_key(new_rec)
 
-        text_for_embedding = build_text_for_embedding(new_rec)
+        new_rec["text_type"] = infer_text_type(new_rec)
+
+        if content_type == "table":
+            new_rec["table_type"] = infer_table_type(new_rec)
+            text_for_embedding = build_table_text_for_embedding(new_rec)
+        else:
+            new_rec["text_type"] = infer_text_type(new_rec)
+            text_for_embedding = build_text_for_embedding(new_rec)
+
         new_rec["text_for_embedding"] = text_for_embedding
         new_rec["embedding_text"] = text_for_embedding
         new_rec["token_count"] = count_tokens(text_for_embedding)

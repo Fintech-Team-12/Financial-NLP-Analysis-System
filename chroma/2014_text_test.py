@@ -4,14 +4,41 @@ from chromadb.utils import embedding_functions
 
 DB_PATH = "./chroma/sqlite_by_year/audit_reports_2014.db"
 CHROMA_PATH = "./chroma_store"
-COLLECTION_NAME = "audit_reports_2014"
+COLLECTION_NAME = "audit_reports_2014_text_bgem3"
+
+
+# metadata 생성용 함수
+def safe_metadata_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def build_metadata(row):
+    return {
+        "chunk_id": safe_metadata_value(row["chunk_id"]),
+        "doc_id": safe_metadata_value(row["doc_id"]),
+        "year": safe_metadata_value(row["year"]),
+        "company": safe_metadata_value(row["company"]),
+        "report_type": safe_metadata_value(row["report_type"]),
+        "top_section": safe_metadata_value(row["top_section"]),
+        "note_number": safe_metadata_value(row["note_number"]),
+        "section_path": safe_metadata_value(row["section_path"]),
+        "section_level": safe_metadata_value(row["section_level"]),
+        "section_title": safe_metadata_value(row["section_title"]),
+        "section_type": safe_metadata_value(row["section_type"]),
+        "content_type": safe_metadata_value(row["content_type"]),
+        "order_index": safe_metadata_value(row["order_index"]),
+    }
+
 
 # 1. SQLite 연결
 conn = sqlite3.connect(DB_PATH)
 conn.row_factory = sqlite3.Row
 cur = conn.cursor()
 
-#metadata수정
 cur.execute("""
     SELECT
         chunk_id,
@@ -50,10 +77,11 @@ except Exception:
 
 # 4. 임베딩 모델 설정
 embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    model_name="BAAI/bge-m3",
+    device="mps"
 )
 
-# 5. 새 컬렉션 생성
+# 5. 컬렉션 생성
 collection = client.get_or_create_collection(
     name=COLLECTION_NAME,
     embedding_function=embedding_function
@@ -65,23 +93,12 @@ documents = []
 metadatas = []
 
 for row in rows:
+    if row["content_type"] != "text":
+        continue
+
     ids.append(row["chunk_id"])
     documents.append(row["embedding_text"])
-    metadatas.append({
-    "chunk_id": row["chunk_id"],
-    "doc_id": row["doc_id"],
-    "year": row["year"],
-    "company": row["company"],
-    "report_type": row["report_type"],
-    "top_section": row["top_section"],
-    "note_number": row["note_number"],
-    "section_path": row["section_path"],
-    "section_level": row["section_level"],
-    "section_title": row["section_title"],
-    "section_type": row["section_type"],
-    "content_type": row["content_type"],
-    "order_index": row["order_index"]
-})
+    metadatas.append(build_metadata(row))
 
 # 7. 적재
 collection.add(
