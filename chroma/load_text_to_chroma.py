@@ -7,6 +7,7 @@ SQLITE_DIR = Path("./chroma/sqlite_by_year")
 CHROMA_PATH = "./chroma_store"
 COLLECTION_NAME = "audit_reports_10years_text_minilm"
 
+#배치사이즈조정
 BATCH_SIZE = 50
 MAX_TEXT_LENGTH = 2000
 
