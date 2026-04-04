@@ -259,8 +259,17 @@ def clean_tree(node):
                     len(tbl.get("rows", [])) == 1 and "단위" in str(tbl["rows"])
                 )
                 if is_unit:
-                    current_unit = str(tbl["rows"][0][0]) if tbl.get("rows") else ""
+                    # 👇 이 줄이 빠져서 났던 에러입니다!
+                    raw_unit = str(tbl["rows"][0][0]) if tbl.get("rows") else ""
+                    
+                    # 단위 정제 로직
+                    clean_u = re.sub(r'^[\-\s]+', '', raw_unit)
+                    clean_u = re.sub(r'(주)\s+(백만원|원|천원)', r'\1, \2', clean_u)
+                    clean_u = re.sub(r'(백만원|원|천원)\s+(주)', r'\1, \2', clean_u)
+                    
+                    current_unit = clean_u
                     continue
+                
                 merged_tables.append(
                     {
                         "unit": current_unit,
