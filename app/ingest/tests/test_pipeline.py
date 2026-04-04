@@ -12,6 +12,7 @@ from src.pipeline import (
     run_pipeline
 )
 from pathlib import Path
+import re
 
 TEST_DATA_DIR = Path(__file__).parent / "test_data" / "raw"
 
@@ -39,6 +40,18 @@ def test_clean_note():
     assert clean_note("(주석 13, 14 참조)") == ['13', '14']
     assert clean_note("nan") == []
     assert clean_note(np.nan) == []
+    
+# pytest용 파라미터화 테스트
+@pytest.mark.parametrize("input_text, expected", [
+    ("건물 및 구축물 15 30 년", "건물 및 구축물 15~30년"),
+    ("비품 5 10년", "비품 5~10년"),
+    ("2014 2015 년", "2014 2015 년"),  # 4자리 숫자라 무시됨
+    ("현금 100 200 원", "현금 100 200 원"),  # '년'이 아니라 무시됨
+    ("제1기 1 2 분기", "제1기 1 2 분기") # '년'이 아니라 무시됨
+])
+def test_regex(input_text, expected):
+    result = re.sub(r'(?<!\d)(\d{1,2})\s+(\d{1,2})\s*년', r'\1~\2년', input_text)
+    assert result == expected
 
 # ==========================================
 # 2. 모의(Mock) 데이터 테스트: 제외 키워드(exclude_keywords) 검증
@@ -71,6 +84,8 @@ def test_extract_financial_statement_exclude_keywords():
     extracted_rows = result["포괄손익계산서"]["tables"][0]["rows"]
     assert len(extracted_rows) == 2
     assert extracted_rows[1][0] == "총포괄손익"
+
+
 
 # ==========================================
 # 3. 모의(Mock) 데이터 테스트: 자본변동표 NaN 에러 방어 검증
