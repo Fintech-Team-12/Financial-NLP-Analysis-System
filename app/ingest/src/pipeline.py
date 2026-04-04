@@ -639,7 +639,7 @@ def run_pipeline(raw_dir: str, processed_dir: str):
         year_data[year].update(parse_appendix(soup))
         year_data[year].update(parse_complex_notes(html_content))
 
-        save_path = os.path.join(processed_dir, f'audit_report_{year}_structured.json')
+        save_path = os.path.join(processed_dir, f'samsung_audit_report_{year}_structured.json')
         with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(year_data, f, ensure_ascii=False, indent=4)
             
