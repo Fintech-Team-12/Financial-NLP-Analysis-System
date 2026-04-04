@@ -99,34 +99,37 @@ def adjust_unit(row, col_name):
 
 
 def html_table_to_dict(table_tag, columns):
-    rows = table_tag.find_all("tr")
+    rows = table_tag.find_all('tr')
     if not rows:
         return []
     table_data = []
     for row in rows:
-        cells = row.find_all(["td", "th"])
-        row_data = [
-            clean_text(cell.get_text(separator=" ", strip=True)) for cell in cells
-        ]
+        cells = row.find_all(['td', 'th'])
+        row_data = [clean_text(cell.get_text(separator=" ", strip=True)) for cell in cells]
         if any(row_data):
             table_data.append(row_data)
     if not table_data:
         return []
     df = pd.DataFrame(table_data)
-
+    
+    # 👇 중첩된 내부 함수 (여기에 정규식이 제대로 들어가야 합니다!)
     def clean_cell(val):
         if pd.isna(val):
             return ""
         text = str(val).strip()
-        text = re.sub(r"\s+", " ", text)
-        if text == "-":
-            return "0"
+        text = re.sub(r'\s+', ' ', text)
+        if text == '-':
+            return '0'
+        
+        # 💥 내용연수 특수 기호(띄어쓰기, 쉼표, 하이픈) 모두 '~'로 완벽 복구
+        text = re.sub(r'(?<!\d)(\d{1,2})[\s,~-]+(\d{1,2})\s*년', r'\1~\2년', text)
+        
         return text
 
-    df_cleaned = df.map(clean_cell) if hasattr(df, "map") else df.applymap(clean_cell)
+    df_cleaned = df.map(clean_cell) if hasattr(df, 'map') else df.applymap(clean_cell)
     raw_data_rows = df_cleaned.values.tolist()
     optimized_rows = []
-
+    
     for r_idx, row in enumerate(raw_data_rows):
         new_row = []
         for c_idx, cell in enumerate(row):
@@ -141,44 +144,37 @@ def html_table_to_dict(table_tag, columns):
                 new_row.append(cell)
         optimized_rows.append(new_row)
 
-    return {"unit": "", "columns": columns, "rows": optimized_rows, "annotations": []}
-
-
+    return {
+        "unit": "",
+        "columns": columns,
+        "rows": optimized_rows,
+        "annotations": []
+    }
 # ==========================================
 # 주석 전용 헬퍼 함수 - 고정 (잘못 덮어씌워진 부분 복구)
 # ==========================================
 def html_table_to_dict_notes(table_tag):
-    marker_pattern = r"(\(\s*\*+\s*\d+\s*\)|\(\s*\*+.*?\).?|\*+\s*\d+|\(주\s*\d*\)|주\s*\d+\s*[)\.]?|주\s*:)"
+    marker_pattern = r'(\(\s*\*+\s*\d+\s*\)|\(\s*\*+.*?\).?|\*+\s*\d+|\(주\s*\d*\)|주\s*\d+\s*[)\.]?|주\s*:)'
     annotations = []
     captured_texts = []
 
-    for td in table_tag.find_all(["td", "th"]):
+    for td in table_tag.find_all(['td', 'th']):
         td_text = td.get_text(separator=" ", strip=True)
         if re.search(marker_pattern, td_text):
             matches = list(re.finditer(marker_pattern, td_text))
             for idx, match in enumerate(matches):
                 marker = match.group(1)
                 start_idx = match.end()
-                end_idx = (
-                    matches[idx + 1].start() if idx + 1 < len(matches) else len(td_text)
-                )
-                text_part = re.sub(
-                    r"계\s*속\s*[:;]*", "", td_text[start_idx:end_idx]
-                ).strip()
+                end_idx = matches[idx+1].start() if idx + 1 < len(matches) else len(td_text)
+                text_part = re.sub(r'계\s*속\s*[:;]*', '', td_text[start_idx:end_idx]).strip()
                 if text_part:
-                    annotations.append(
-                        {
-                            "type": "footnote",
-                            "marker": marker.strip(),
-                            "text": text_part,
-                        }
-                    )
-
+                    annotations.append({"type": "footnote", "marker": marker.strip(), "text": text_part})
+            
             for content in td.contents:
                 if isinstance(content, str):
-                    new_str = re.sub(marker_pattern, "", content).strip()
+                    new_str = re.sub(marker_pattern, '', content).strip()
                     content.replace_with(new_str)
-                elif content.name == "br":
+                elif content.name == 'br':
                     pass
 
     try:
@@ -190,47 +186,30 @@ def html_table_to_dict_notes(table_tag):
     except Exception:
         return None
 
-    columns = (
-        [
-            "_".join([str(c) for c in col if "Unnamed" not in str(c)]).strip()
-            for col in df.columns
-        ]
-        if isinstance(df.columns, pd.MultiIndex)
-        else [str(c) for c in df.columns]
-    )
-
+    columns = ["_".join([str(c) for c in col if 'Unnamed' not in str(c)]).strip() for col in df.columns] if isinstance(df.columns, pd.MultiIndex) else [str(c) for c in df.columns]
+    
+    # 👇 중첩된 내부 함수 (여기에 정규식이 제대로 들어가야 합니다!)
     def clean_cell_notes(val):
         if pd.isna(val):
             return ""
-        text = (
-            str(val)
-            .strip()
-            .replace("\xa0", " ")
-            .replace("\u2002", " ")
-            .replace("\u2003", " ")
-        )
-        text = re.sub(r"\s+", " ", text)
-        if text == "-":
-            return "0"
-        text = re.sub(r"\(\s*-?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(%?)\s*\)", r"-\1\2", text)
-        return re.sub(
-            r"(?<!\d)-?\d+(?:,\d{3})*(?:\.\d+)?(?!\d)",
-            lambda m: m.group(0).replace(",", ""),
-            text,
-        )
+        text = str(val).strip().replace('\xa0', ' ').replace('\u2002', ' ').replace('\u2003', ' ')
+        text = re.sub(r'\s+', ' ', text)
+        if text == '-':
+            return '0'
+        
+        # 💥 내용연수 특수 기호(띄어쓰기, 쉼표, 하이픈) 모두 '~'로 완벽 복구
+        text = re.sub(r'(?<!\d)(\d{1,2})[\s,~-]+(\d{1,2})\s*년', r'\1~\2년', text)
+        
+        text = re.sub(r'\(\s*-?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(%?)\s*\)', r'-\1\2', text)
+        return re.sub(r'(?<!\d)-?\d+(?:,\d{3})*(?:\.\d+)?(?!\d)', lambda m: m.group(0).replace(',', ''), text)
 
-    df_cleaned = (
-        df.map(clean_cell_notes)
-        if hasattr(df, "map")
-        else df.applymap(clean_cell_notes)
-    )
+    df_cleaned = df.map(clean_cell_notes) if hasattr(df, 'map') else df.applymap(clean_cell_notes)
     data_rows = df_cleaned.values.tolist()
     processed_rows = []
-
+    
     for row in data_rows:
         new_row = []
         for cell in row:
-            # 숫자처럼 생긴 값만 변환 시도
             try:
                 val = clean_amount(cell)
                 new_row.append(val)
@@ -240,53 +219,32 @@ def html_table_to_dict_notes(table_tag):
 
     curr_node = table_tag.next_sibling
     search_limit = 10
-
+    
     while curr_node and search_limit > 0:
-        if getattr(curr_node, "name", None) == "table":
+        if getattr(curr_node, 'name', None) == 'table':
             break
-        node_text = (
-            curr_node.get_text(separator=" ", strip=True)
-            if hasattr(curr_node, "get_text")
-            else str(curr_node).strip()
-        )
+        node_text = curr_node.get_text(separator=" ", strip=True) if hasattr(curr_node, 'get_text') else str(curr_node).strip()
         if not node_text:
             curr_node = curr_node.next_sibling
             search_limit -= 1
             continue
-
+            
         if re.search(marker_pattern, node_text):
             captured_texts.append(node_text)
             matches = list(re.finditer(marker_pattern, node_text))
             for idx, match in enumerate(matches):
                 marker = match.group(1)
                 start_idx = match.end()
-                end_idx = (
-                    matches[idx + 1].start()
-                    if idx + 1 < len(matches)
-                    else len(node_text)
-                )
-                text_part = re.sub(
-                    r"계\s*속\s*[:;]*", "", node_text[start_idx:end_idx]
-                ).strip()
+                end_idx = matches[idx+1].start() if idx + 1 < len(matches) else len(node_text)
+                text_part = re.sub(r'계\s*속\s*[:;]*', '', node_text[start_idx:end_idx]).strip()
                 if text_part:
-                    annotations.append(
-                        {
-                            "type": "footnote",
-                            "marker": marker.strip(),
-                            "text": text_part,
-                        }
-                    )
-            search_limit = 10
+                    annotations.append({"type": "footnote", "marker": marker.strip(), "text": text_part})
+            search_limit = 10 
         else:
             search_limit -= 1
         curr_node = curr_node.next_sibling
 
-    return {
-        "columns": columns,
-        "rows": processed_rows,
-        "annotations": annotations,
-        "captured_texts": captured_texts,
-    }
+    return {"columns": columns, "rows": processed_rows, "annotations": annotations, "captured_texts": captured_texts}
 
 
 def clean_tree(node):
