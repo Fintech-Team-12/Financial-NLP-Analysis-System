@@ -1,3 +1,6 @@
+.DS_Store
+chroma/.DS_Store
+chroma/flattened_data/
 .env
 .DS_Store
 
