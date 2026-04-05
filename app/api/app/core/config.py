@@ -11,12 +11,13 @@ class Settings:
     # Docker: WORKDIR=/workspace, data 볼륨은 /workspace/data 로 마운트됨
     # 로컬:   프로젝트 루트 기준 data/processed (PYTHONPATH=app/api 로 실행 가정)
     # 테스트: conftest.py 에서 settings.data_dir 을 임시 경로로 덮어씀
-    data_dir: str = os.getenv("DATA_DIR", "data/processed")
+    # 로컬 실행 시 app/api/ 디렉토리에서 실행되므로 프로젝트 루트 기준으로 경로 설정
+    data_dir: str = os.getenv("DATA_DIR", str(Path(__file__).resolve().parents[4] / "data" / "processed"))
 
     # ── 동작 모드 ─────────────────────────────────────────────────────────────
     # True  → MockRetriever + MockGenerator (Chroma/Ollama 불필요)
     # False → ChromaRetriever + OllamaGenerator (담당자 구현 후 교체)
-    mock_mode: bool = os.getenv("MOCK_MODE", "false").lower() == "true"
+    mock_mode: bool = os.getenv("MOCK_MODE", "true").lower() == "true"
 
     # ── ChromaDB — PersistentClient 경로 (현재 사용) ──────────────────────────
     # 팀원 chroma/load_*.py 가 "./chroma_store" 에 적재.
@@ -48,9 +49,14 @@ class Settings:
     # 테스트: conftest 에서 "sqlite:///:memory:" 로 덮어씀
     db_url: str = os.getenv("APP_DB_URL", "sqlite:///data/app.db")
 
+    # ── JWT & Google OAuth ────────────────────────────────────────────────────────
+    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "my_super_secret_jwt_key")
+    jwt_algorithm: str = "HS256"
+    google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "YOUR_GOOGLE_CLIENT_ID_HERE.apps.googleusercontent.com")
+
     def get_data_path(self, year: int) -> Path:
         """연도별 processed JSON 파일 경로 반환."""
-        return Path(self.data_dir) / f"samsung_audit_report_{year}_structured.json"
+        return Path(self.data_dir) / f"삼성전자_audit_report_{year}_structured.json"
 
 
 # 모듈 수준 싱글턴 — 테스트에서 settings.data_dir = "..." 으로 직접 덮어쓰기 가능

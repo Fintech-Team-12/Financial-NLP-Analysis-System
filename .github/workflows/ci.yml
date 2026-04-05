@@ -43,14 +43,8 @@ jobs:
       - name: Ruff Ingest
         run: ruff check app/ingest/src app/ingest/tests
 
-<<<<<<< HEAD
-      - name: Pytest
-        run: pytest app/api/tests --cov=app/api/app --cov-report=term-missing -v
-=======
-
       - name: Pytest API
         run: pytest app/api/tests --cov=app/api/app --cov-report=term-missing
->>>>>>> origin/main
         env:
           PYTHONPATH: app/api
           MOCK_MODE: "true"   # CI 에서는 항상 mock 모드 (Chroma/Ollama 불필요)

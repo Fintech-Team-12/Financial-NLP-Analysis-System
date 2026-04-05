@@ -24,6 +24,7 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
   useEffect(() => {
     const fetchMessages = async () => {
       if (!currentChatId) {
+        setChatTitle('New Chatting');
         setMessages([
           { id: 'welcome', role: 'assistant', content: '안녕하세요! 감사보고서 분석 어시스턴트입니다. 새로운 대화를 시작했습니다. 무엇을 도와드릴까요?' }
         ]);

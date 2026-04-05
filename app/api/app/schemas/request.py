@@ -4,10 +4,11 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class QARequest(BaseModel):
+class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1, description="질문 텍스트")
     year: Optional[int] = Field(None, ge=2014, le=2030, description="특정 연도 (없으면 전체)")
     top_k: int = Field(5, ge=1, le=20, description="검색 결과 수")
+    chat_id: Optional[int] = Field(None, description="기존 대화 세션 ID (없으면 새 대화)")
 
     model_config = {"json_schema_extra": {"example": {"question": "2023년 매출채권 금액은?", "year": 2023}}}
 

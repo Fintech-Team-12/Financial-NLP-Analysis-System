@@ -19,6 +19,7 @@ __pycache__/
 *.so
 venv/
 env/
+app/api/app/data
 
 # Database & User Uploads
 
@@ -28,3 +29,5 @@ chroma/flattened_data/
 .pytest_cache/
 chroma_store/
 chroma_db/
+
+data/processed/

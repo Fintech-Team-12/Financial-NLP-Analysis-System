@@ -12,7 +12,7 @@ MockGenerator: 검색 문서를 포맷팅해서 반환 (LLM 없이 동작)
 from abc import ABC, abstractmethod
 
 from app.models.document import NormalizedDocument
-from app.schemas.response import Citation, QAResponse
+from app.schemas.response import Citation, ChatResponse
 from app.services.router import QuestionType
 
 
@@ -25,7 +25,7 @@ class GeneratorBase(ABC):
         question: str,
         docs: list[NormalizedDocument],
         question_type: QuestionType,
-    ) -> QAResponse:
+    ) -> ChatResponse:
         ...
 
 
@@ -40,9 +40,9 @@ class MockGenerator(GeneratorBase):
         question: str,
         docs: list[NormalizedDocument],
         question_type: QuestionType,
-    ) -> QAResponse:
+    ) -> ChatResponse:
         if not docs:
-            return QAResponse(
+            return ChatResponse(
                 answer="관련 문서를 찾을 수 없습니다.",
                 citations=[],
                 question_type=question_type,
@@ -66,7 +66,7 @@ class MockGenerator(GeneratorBase):
             for doc in docs
         ]
 
-        return QAResponse(
+        return ChatResponse(
             answer=answer,
             citations=citations,
             question_type=question_type,

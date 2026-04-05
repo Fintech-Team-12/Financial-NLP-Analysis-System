@@ -13,11 +13,12 @@ class Citation(BaseModel):
     numeric_value: Optional[dict] = None   # 숫자형 질문일 때 구조화 값 포함
 
 
-class QAResponse(BaseModel):
+class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation]
     question_type: str                     # "numeric" | "note_linked" | "descriptive"
     used_documents: list[str]              # doc_id 리스트
+    chat_id: Optional[int] = None
 
 
 class IngestResponse(BaseModel):
