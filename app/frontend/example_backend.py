@@ -85,6 +85,9 @@ class MessageCreate(BaseModel):
     question: str
     year: int
 
+class ChatUpdate(BaseModel):
+    title: str
+
 class ChatResponse(BaseModel):
     id: int
     title: str
@@ -99,6 +102,10 @@ class MessageResponse(BaseModel):
     created_at: datetime
     class Config:
         orm_mode = True
+
+class ChatDetailResponse(BaseModel):
+    title: str
+    messages: List[MessageResponse]
 
 
 # -----------------------------------------------------------------
@@ -198,14 +205,36 @@ def get_user_chats(current_user: User = Depends(get_current_user), db: Session =
     chats = db.query(Chat).filter(Chat.user_id == current_user.id).order_by(Chat.created_at.desc()).all()
     return chats
 
-@app.get("/api/chats/{chat_id}/messages", response_model=List[MessageResponse])
-def get_chat_messages(chat_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """특정 채팅방의 메시지들 반환"""
+@app.put("/api/chats/{chat_id}")
+def update_chat_title(chat_id: int, req: ChatUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """채팅방 이름 변경"""
     chat = db.query(Chat).filter(Chat.id == chat_id, Chat.user_id == current_user.id).first()
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
     
-    return chat.messages
+    chat.title = req.title
+    db.commit()
+    return {"message": "success"}
+
+@app.delete("/api/chats/{chat_id}")
+def delete_chat(chat_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """채팅방 삭제"""
+    chat = db.query(Chat).filter(Chat.id == chat_id, Chat.user_id == current_user.id).first()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    db.delete(chat)
+    db.commit()
+    return {"message": "success"}
+
+@app.get("/api/chats/{chat_id}/messages", response_model=ChatDetailResponse)
+def get_chat_messages(chat_id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """특정 채팅방의 메시지들과 타이틀 반환"""
+    chat = db.query(Chat).filter(Chat.id == chat_id, Chat.user_id == current_user.id).first()
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    
+    return {"title": chat.title, "messages": chat.messages}
 
 @app.post("/api/chat")
 def ask_question(

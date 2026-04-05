@@ -25,13 +25,23 @@ const FileUploader = ({ onClose }) => {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      setFile(e.dataTransfer.files[0]);
+      const dropFile = e.dataTransfer.files[0];
+      if (dropFile.name.toLowerCase().endsWith('.htm') || dropFile.name.toLowerCase().endsWith('.html')) {
+        setFile(dropFile);
+      } else {
+        alert('.htm 또는 .html 파일만 업로드 가능합니다.');
+      }
     }
   };
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+      const selectFile = e.target.files[0];
+      if (selectFile.name.toLowerCase().endsWith('.htm') || selectFile.name.toLowerCase().endsWith('.html')) {
+        setFile(selectFile);
+      } else {
+        alert('.htm 또는 .html 파일만 업로드 가능합니다.');
+      }
     }
   };
 
@@ -91,7 +101,7 @@ const FileUploader = ({ onClose }) => {
               ref={fileInputRef} 
               onChange={handleFileChange} 
               style={{ display: 'none' }} 
-              accept=".pdf,.txt,.html,.csv"
+              accept=".htm,.html"
             />
           </div>
         )}

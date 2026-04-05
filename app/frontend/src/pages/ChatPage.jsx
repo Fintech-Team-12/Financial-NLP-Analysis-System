@@ -9,7 +9,8 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  
+  const [chatTitle, setChatTitle] = useState('New Chatting');
+
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -24,7 +25,7 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
     const fetchMessages = async () => {
       if (!currentChatId) {
         setMessages([
-          { id: 'welcome', role: 'assistant', content: '안녕하세요! 삼성전자 감사보고서 분석 어시스턴트입니다. 새로운 대화를 시작했습니다. 무엇을 도와드릴까요?' }
+          { id: 'welcome', role: 'assistant', content: '안녕하세요! 감사보고서 분석 어시스턴트입니다. 새로운 대화를 시작했습니다. 무엇을 도와드릴까요?' }
         ]);
         return;
       }
@@ -34,7 +35,8 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
         const res = await axios.get(`${API_BASE_URL}/chats/${currentChatId}/messages`, {
           headers: { Authorization: `Bearer ${token}` }
         });
-        setMessages(res.data);
+        setMessages(res.data.messages || []);
+        setChatTitle(res.data.title || 'New Chatting');
       } catch (error) {
         console.error('Failed to load messages', error);
       }
@@ -58,23 +60,23 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
         question: userMessageContent,
         year: 2024
       };
-      
+
       if (currentChatId) {
         payload.chat_id = currentChatId;
       }
 
       const response = await axios.post(`${API_BASE_URL}/chat`, payload, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 60000 
+        timeout: 60000
       });
 
       if (!currentChatId && response.data.chat_id) {
         setCurrentChatId(response.data.chat_id);
       } else {
         setMessages(prev => {
-          return [...prev.filter(m => m.id !== 'optimistic'), 
-            { id: Date.now(), role: 'user', content: userMessageContent },
-            { id: Date.now() + 1, role: 'assistant', content: response.data.answer }
+          return [...prev.filter(m => m.id !== 'optimistic'),
+          { id: Date.now(), role: 'user', content: userMessageContent },
+          { id: Date.now() + 1, role: 'assistant', content: response.data.answer }
           ];
         });
       }
@@ -91,6 +93,7 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
   };
 
   const handleKeyDown = (e) => {
+    if (e.nativeEvent.isComposing) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -101,7 +104,7 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
     <div className="chat-page">
       <header className="chat-header glass">
         <div className="header-title">
-          <h2>Samsung Audit Report QA</h2>
+          <h2>{chatTitle}</h2>
           <span className="badge">JWT Active</span>
         </div>
       </header>
@@ -140,8 +143,8 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
             rows={1}
             autoFocus
           />
-          
-          <button 
+
+          <button
             className={`send-btn ${input.trim() ? 'active' : ''}`}
             onClick={handleSend}
             disabled={!input.trim() || isLoading}
