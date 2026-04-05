@@ -4,6 +4,8 @@
 __pycache__
 *.db
 *.sqlite3
+*.pyc
+.pytest_cache/
 
 # Node / Vite (Frontend)
 node_modules/
@@ -26,7 +28,6 @@ app/api/app/data
 example_finance.db
 uploaded_files/
 chroma/flattened_data/
-.pytest_cache/
 chroma_store/
 chroma_db/
 
