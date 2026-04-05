@@ -11,6 +11,12 @@ from app.services.router import QuestionType, classify_question
 router = APIRouter()
 
 
+@router.post("/ask", response_model=QAResponse, include_in_schema=False)
+def ask_legacy(req: QARequest) -> QAResponse:
+    """프론트엔드 하위호환 alias — /qa 와 동일."""
+    return ask(req)
+
+
 @router.post("/qa", response_model=QAResponse)
 def ask(req: QARequest) -> QAResponse:
     """
