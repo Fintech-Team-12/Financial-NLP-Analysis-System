@@ -630,49 +630,37 @@ def parse_appendix(soup):
         if not text_clean:
             continue
 
-        if len(text_clean) < 50 and re.search(
-            r"내부회계관리제도\s*검토보고서|내부회계관리제도\s*감사보고서", text_clean
-        ):
-            if current_section:
-                appendix_data["sub_sections"][current_section] = {
-                    "title": current_section,
-                    "content": "\n".join(content_buffer),
-                    "tables": tables_buffer,
-                    "sub_sections": {},
-                }
-            current_section = "감사인의 내부회계관리제도 보고서"
-            content_buffer, tables_buffer = [], []
-            continue
-        elif (
-            len(text_clean) < 50
-            and re.search(
-                r"내부회계관리제도\s*운영실태\s*평가보고서|내부회계관리제도\s*운영실태보고서",
-                text_clean,
-            )
-            and not re.search(r"검토보고서|감사보고서", text_clean)
-        ):
-            if current_section:
-                appendix_data["sub_sections"][current_section] = {
-                    "title": current_section,
-                    "content": "\n".join(content_buffer),
-                    "tables": tables_buffer,
-                    "sub_sections": {},
-                }
-            current_section = "경영진의 내부회계관리제도 운영실태보고서"
-            content_buffer, tables_buffer = [], []
-            continue
-        elif len(text_clean) < 50 and re.search(r"외부감사\s*실시내용", text_clean):
-            if current_section:
-                appendix_data["sub_sections"][current_section] = {
-                    "title": current_section,
-                    "content": "\n".join(content_buffer),
-                    "tables": tables_buffer,
-                    "sub_sections": {},
-                }
-            current_section = "외부감사 실시내용"
-            content_buffer, tables_buffer = [], []
-            continue
+        matched_section = None
+        # 🚀 [업그레이드 1] 문장 중간에 언급되는 가짜 제목을 무시하고, 맨 앞(30자 이내)에 등장할 때만 진짜 제목으로 판정
+        if re.search(r"^.{0,30}내부회계관리제도\s*(검토|감사)보고서", text_clean):
+            matched_section = "감사인의 내부회계관리제도 보고서"
+        elif re.search(r"^.{0,30}내부회계관리제도\s*운영실태\s*(평가)?보고서", text_clean) and not re.search(r"검토|감사", text_clean[:30]):
+            matched_section = "경영진의 내부회계관리제도 운영실태보고서"
+        elif re.search(r"^.{0,30}외부감사\s*실시내용", text_clean):
+            matched_section = "외부감사 실시내용"
 
+        # 새로운 섹션을 발견하면 기존 데이터를 '누적 저장' (덮어쓰기 증발 원천 차단)
+        if matched_section and matched_section != current_section:
+            if current_section:
+                if current_section not in appendix_data["sub_sections"]:
+                    appendix_data["sub_sections"][current_section] = {
+                        "title": current_section,
+                        "content": "",
+                        "tables": [],
+                        "sub_sections": {},
+                    }
+                if content_buffer:
+                    appendix_data["sub_sections"][current_section]["content"] += "\n" + "\n".join(content_buffer)
+                if tables_buffer:
+                    appendix_data["sub_sections"][current_section]["tables"].extend(tables_buffer)
+            
+            current_section = matched_section
+            content_buffer, tables_buffer = [], []
+            
+            if len(text_clean) < 50:
+                continue
+
+        # 본문 및 표 데이터 수집
         if current_section:
             if tag.name == "table":
                 columns = (
@@ -687,16 +675,29 @@ def parse_appendix(soup):
                 if text_clean not in content_buffer:
                     content_buffer.append(text_clean)
 
+    # 🚀 [업그레이드 2] 마지막으로 켜져 있던 섹션도 안전하게 '누적 저장'
     if current_section:
-        appendix_data["sub_sections"][current_section] = {
-            "title": current_section,
-            "content": "\n".join(content_buffer),
-            "tables": tables_buffer,
-            "sub_sections": {},
-        }
+        if current_section not in appendix_data["sub_sections"]:
+            appendix_data["sub_sections"][current_section] = {
+                "title": current_section,
+                "content": "",
+                "tables": [],
+                "sub_sections": {},
+            }
+        if content_buffer:
+            appendix_data["sub_sections"][current_section]["content"] += "\n" + "\n".join(content_buffer)
+        if tables_buffer:
+            appendix_data["sub_sections"][current_section]["tables"].extend(tables_buffer)
+
+    # 🧹 목차만 읽고 지나간 껍데기 섹션들을 깔끔하게 청소
+    final_sub_sections = {}
+    for k, v in appendix_data["sub_sections"].items():
+        v["content"] = v["content"].strip()
+        if v["content"] or v["tables"]:
+            final_sub_sections[k] = v
+    appendix_data["sub_sections"] = final_sub_sections
 
     return {"부록": appendix_data}
-
 
 def parse_complex_notes(html_content):
     soup = BeautifulSoup(re.sub(r"\r?\n", "", html_content), "html.parser")
