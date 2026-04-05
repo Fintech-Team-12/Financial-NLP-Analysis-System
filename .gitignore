@@ -1,2 +1,26 @@
 .env
 .DS_Store
+
+# Node / Vite (Frontend)
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# Python / FastAPI (Backend)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+
+# Database & User Uploads
+*.db
+*.sqlite3
+example_finance.db
+uploaded_files/
+chroma/
+__pycache__
+.vite
