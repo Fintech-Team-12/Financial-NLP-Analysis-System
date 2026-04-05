@@ -1,15 +1,25 @@
-FROM python:3.11-slim
+# 1단계: 빌드 스테이지
+FROM node:20-alpine AS build-stage
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+WORKDIR /app
 
-WORKDIR /workspace
+# 의존성 설치 (캐시 활용)
+COPY app/frontend/package*.json ./
+RUN npm install
 
-COPY app/frontend/requirements.txt /tmp/requirements.txt
-RUN pip install --upgrade pip && pip install -r /tmp/requirements.txt
+# 소스 복사 및 빌드
+COPY app/frontend/ ./
+RUN npm run build
 
-COPY app/frontend /workspace
+# 2단계: 실행 스테이지 (Nginx)
+FROM nginx:stable-alpine AS production-stage
 
-EXPOSE 8501
-CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# 빌드 결과물 복사
+COPY --from=build-stage /app/dist /usr/share/nginx/html
+
+# 전문가용 Nginx 설정 파일 복사
+COPY app/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
