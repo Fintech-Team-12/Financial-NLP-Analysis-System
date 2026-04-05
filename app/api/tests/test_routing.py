@@ -94,7 +94,7 @@ def test_note_linking_via_financial_statement(sample_data_dir: str) -> None:
 
     # 초기화
     indexing._store.clear()
-    indexing._indexed_years.clear()
+    indexing._indexed_files.clear()
     original = settings.data_dir
     settings.data_dir = sample_data_dir
 
@@ -107,7 +107,7 @@ def test_note_linking_via_financial_statement(sample_data_dir: str) -> None:
     finally:
         settings.data_dir = original
         indexing._store.clear()
-        indexing._indexed_years.clear()
+        indexing._indexed_files.clear()
 
 
 def test_find_by_note_ids(sample_data_dir: str) -> None:
@@ -116,7 +116,7 @@ def test_find_by_note_ids(sample_data_dir: str) -> None:
     from app.services import indexing
 
     indexing._store.clear()
-    indexing._indexed_years.clear()
+    indexing._indexed_files.clear()
     original = settings.data_dir
     settings.data_dir = sample_data_dir
 
@@ -129,4 +129,4 @@ def test_find_by_note_ids(sample_data_dir: str) -> None:
     finally:
         settings.data_dir = original
         indexing._store.clear()
-        indexing._indexed_years.clear()
+        indexing._indexed_files.clear()

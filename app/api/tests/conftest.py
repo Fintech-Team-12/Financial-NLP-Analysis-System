@@ -92,10 +92,10 @@ def reset_store() -> Generator[None, None, None]:
     """테스트 전후 in-memory store 초기화."""
     from app.services import indexing
     indexing._store.clear()
-    indexing._indexed_years.clear()
+    indexing._indexed_files.clear()
     yield
     indexing._store.clear()
-    indexing._indexed_years.clear()
+    indexing._indexed_files.clear()
 
 
 @pytest.fixture
@@ -116,11 +116,10 @@ def client(sample_data_dir: str, reset_store: None) -> Generator[TestClient, Non
     settings.data_dir = sample_data_dir
     settings.mock_mode = True  # 단위 테스트는 Chroma 불필요
 
-    from app.main import app
     with TestClient(app) as c:
         # lifespan 자동 ingest 가 실행된 후이므로 store 를 비워 깨끗한 상태로 시작
         indexing._store.clear()
-        indexing._indexed_years.clear()
+        indexing._indexed_files.clear()
         yield c
 
     settings.data_dir = original_dir

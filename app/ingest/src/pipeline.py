@@ -15,32 +15,46 @@ from pathlib import Path
 # 회사명 자동 추출 함수
 def extract_company_name_from_html(soup):
     full_text = soup.get_text(separator=' ', strip=True)
-    head_text = full_text[:1000] 
+    # 공백 및 특수 공백 정제
+    full_text = full_text.replace('\xa0', ' ').replace('\u2002', ' ').replace('\u2003', ' ')
+    head_text = full_text[:2000]  # 탐색 범위를 조금 더 확장
 
     corp_full = r'(?:주\s*식|유\s*한|유\s*한\s*책\s*임|합\s*자|합\s*명)\s*회\s*사'
     corp_short = r'(?:주|유|합자|합명)'
     
+    # 1. "회사명 : XXX" 패턴
     match = re.search(r'회\s*사\s*명\s*[:：]\s*([가-힣a-zA-Z0-9\s\(주\)]+?)(?=\s|\[|\()', head_text)
     if match:
         name = match.group(1).replace(" ", "")
         name = re.sub(r'\([주유합명자]+\)', '', name) 
         name = re.sub(r'주식회사|유한책임회사|유한회사|합자회사|합명회사', '', name)
-        if name: 
-            return name
+        if name: return name
 
-    match = re.search(rf'([가-힣a-zA-Z0-9]+)\s*{corp_full}', head_text)
+    # 2. "XXX 주식회사" 또는 "주식회사 XXX" 패턴 (공백 허용)
+    # 삼성전자 주식회사 등
+    match = re.search(rf'([가-힣a-zA-Z0-9\s]+?)\s*{corp_full}', head_text)
     if match:
-        return match.group(1).replace(" ", "")
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2: return name
         
-    match = re.search(rf'{corp_full}\s*([가-힣a-zA-Z0-9]+)', head_text)
+    match = re.search(rf'{corp_full}\s*([가-힣a-zA-Z0-9\s]+?)', head_text)
     if match:
-        return match.group(1).replace(" ", "")
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2: return name
         
-    match = re.search(rf'([가-힣a-zA-Z0-9]+)\s*\(\s*{corp_short}\s*\)', head_text)
+    # 3. (주)XXX 또는 XXX(주) 패턴
+    match = re.search(rf'([가-힣a-zA-Z0-9\s]+?)\s*\(\s*{corp_short}\s*\)', head_text)
     if match:
-        return match.group(1).replace(" ", "")
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2: return name
         
-    match = re.search(rf'\(\s*{corp_short}\s*\)\s*([가-힣a-zA-Z0-9]+)', head_text)
+    match = re.search(rf'\(\s*{corp_short}\s*\)\s*([가-힣a-zA-Z0-9\s]+?)', head_text)
+    if match:
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2: return name
+
+    # 4. "제 XX 기" 주변에서 찾기 (DART 표준 표지 하단 패턴)
+    match = re.search(r'제\s*\d+\s*기\s*.*?([가-힣a-zA-Z0-9]+)\s*(?:주식회사|\(주\))', head_text, re.DOTALL)
     if match:
         return match.group(1).replace(" ", "")
 
