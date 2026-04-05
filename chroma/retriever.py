@@ -6,7 +6,8 @@ from typing import Any, Literal
 import chromadb
 
 
-CHROMA_PATH = "./chroma_store"
+BASE_DIR = Path(__file__).resolve().parent
+CHROMA_PATH = BASE_DIR / "chroma_store"
 
 TEXT_COLLECTION_NAME = "audit_reports_10years_text_minilm"
 TABLE_COLLECTION_NAME = "audit_reports_10years_table_minilm"
@@ -16,8 +17,7 @@ CollectionType = Literal["text", "table", "mixed"]
 
 
 def get_client() -> chromadb.PersistentClient:
-    return chromadb.PersistentClient(path=str(Path(CHROMA_PATH)))
-
+    return chromadb.PersistentClient(path=str(CHROMA_PATH))
 
 def get_collection(collection_type: Literal["text", "table"]):
     client = get_client()

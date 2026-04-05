@@ -3,7 +3,8 @@ from pathlib import Path
 from collections import Counter
 from pprint import pprint
 
-CHROMA_PATH = "./chroma_store"
+BASE_DIR = Path(__file__).resolve().parent
+CHROMA_PATH = BASE_DIR / "chroma_store"
 COLLECTION_NAMES = [
     "audit_reports_10years_text_minilm",
     "audit_reports_10years_table_minilm",
