@@ -73,6 +73,8 @@ def ingest_year(year: int, force: bool = False) -> int:
     지정 연도의 모든 processed JSON 파일들을 찾아 인덱싱합니다.
     """
     processed_files = settings.get_all_processed_files(year)
+    if not processed_files:
+        raise FileNotFoundError(f"{year}년 데이터를 찾을 수 없습니다. (data/processed/ 하위에 관련 JSON 파일 없음)")
     total_count = 0
     for file_path in processed_files:
         total_count += ingest_single_file(file_path, force=force)

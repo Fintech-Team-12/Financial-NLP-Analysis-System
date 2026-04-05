@@ -41,7 +41,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router, tags=["system"])
-app.include_router(ingest.router, tags=["ingest"])
+# app.include_router(ingest.router, tags=["ingest"]) # Moved below
 
 # vector 라우터는 chromadb 설치 시에만 등록
 try:
@@ -51,6 +51,7 @@ except ImportError:
     pass  # chromadb 미설치 환경에서는 스킵
 
 # Frontend 연동용 API 엔드포인트
+app.include_router(ingest.router, prefix="/api", tags=["ingest"])
 app.include_router(chat_qa.router, prefix="/api", tags=["chat"])
 app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(chats.router, prefix="/api", tags=["chats"])

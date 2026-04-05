@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 # ── 실제 processed JSON 과 동일한 포맷의 최소 샘플 ───────────────────────────
 SAMPLE_DATA = {
     "2023": {
+        "company": "삼성전자",
         "감사보고서": {
             "title": "감사보고서 본문",
             "content": "",
@@ -125,3 +126,32 @@ def client(sample_data_dir: str, reset_store: None) -> Generator[TestClient, Non
 
     settings.data_dir = original_dir
     settings.mock_mode = original_mock
+
+
+@pytest.fixture
+def auth_client(client: TestClient) -> Generator[TestClient, None, None]:
+    """인증된 사용자로 요청을 보내는 TestClient."""
+    from app.main import app
+    from app.core.auth_deps import get_current_user
+    from app.db.models import User
+
+    # 가짜 사용자 객체 생성
+    from app.db.session import get_session
+    mock_user = User(
+        id=1,
+        email="test@example.com",
+        name="테스트사용자"
+    )
+    
+    # DB에 사용자 존재 여부 확인 및 생성 (IntegrityError 방지)
+    with get_session() as db:
+        db.merge(mock_user)
+        db.commit()
+
+    # get_current_user 의존성 오버라이드
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+    
+    yield client
+    
+    # 테스트 종료 후 오버라이드 제거
+    app.dependency_overrides.clear()

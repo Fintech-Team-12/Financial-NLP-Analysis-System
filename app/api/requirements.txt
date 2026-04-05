@@ -18,7 +18,7 @@ chromadb==0.5.23
 sentence-transformers==3.0.1
 
 # ── Test ──────────────────────────────────────────────────────────────────────
-pytest==8.4.1
+pytest==8.4.2
 pytest-cov==6.2.1
 anyio[trio]==4.9.0   # pytest-anyio 비동기 테스트 지원 (현재 동기 위주, 추후 확장용)
 

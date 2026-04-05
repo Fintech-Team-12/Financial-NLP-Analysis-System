@@ -1,5 +1,5 @@
 """
-POST /vector/index, POST /vector/search, GET /vector/health 테스트.
+POST /api/vector/index, POST /api/vector/search, GET /api/vector/health 테스트.
 
 chromadb.PersistentClient 및 임베딩 모델 로딩을 mock 으로 대체해
 외부 의존성 없이 실행 가능.
@@ -48,14 +48,14 @@ def _mock_client(collection_names: list[str] = (), collection: MagicMock | None 
     return fc
 
 
-# ── GET /vector/health ────────────────────────────────────────────────────────
+# ── GET /api/vector/health ────────────────────────────────────────────────────────
 
 def test_vector_health_store_unavailable():
     with patch(
         "app.services.vector_store._get_client",
         side_effect=Exception("chroma_store not found"),
     ):
-        resp = client.get("/vector/health")
+        resp = client.get("/api/vector/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data["store"] == "unavailable"
@@ -67,7 +67,7 @@ def test_vector_health_store_unavailable():
 def test_vector_health_store_empty_no_collections():
     fc = _mock_client(collection_names=[])
     with patch("app.services.vector_store._get_client", return_value=fc):
-        resp = client.get("/vector/health")
+        resp = client.get("/api/vector/health")
     assert resp.status_code == 200
     data = resp.json()
     assert data["store"] == "ok"
@@ -92,7 +92,7 @@ def test_vector_health_partial_indexing():
     fc.get_collection.return_value = col_text
 
     with patch("app.services.vector_store._get_client", return_value=fc):
-        resp = client.get("/vector/health")
+        resp = client.get("/api/vector/health")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -109,7 +109,7 @@ def test_vector_health_text_collection_empty():
     fc.get_collection.return_value = col_empty
 
     with patch("app.services.vector_store._get_client", return_value=fc):
-        resp = client.get("/vector/health")
+        resp = client.get("/api/vector/health")
 
     data = resp.json()
     assert data["indexed_years"] == []
@@ -121,20 +121,20 @@ def test_vector_health_response_schema():
     """응답 필드 구조 확인."""
     fc = _mock_client()
     with patch("app.services.vector_store._get_client", return_value=fc):
-        resp = client.get("/vector/health")
+        resp = client.get("/api/vector/health")
     data = resp.json()
     for key in ("store", "indexed_years", "empty_years", "missing_years", "collection_stats"):
         assert key in data
 
 
-# ── POST /vector/index ────────────────────────────────────────────────────────
+# ── POST /api/vector/index ────────────────────────────────────────────────────────
 
 def test_vector_index_missing_enriched_file(tmp_path, monkeypatch):
     import app.core.config as cfg
     monkeypatch.setattr(cfg.settings, "chroma_enriched_data_dir", str(tmp_path))
     fc = _mock_client()
     with patch("app.services.vector_store._get_client", return_value=fc):
-        resp = client.post("/vector/index", json={"year": 2020})
+        resp = client.post("/api/vector/index", json={"year": 2020})
     assert resp.status_code == 404
     assert "Enriched data not found" in resp.json()["detail"]
 
@@ -160,7 +160,7 @@ def test_vector_index_ok(tmp_path, monkeypatch):
     fc = _mock_client(collection=col)
     with patch("app.services.vector_store._get_client", return_value=fc):
         with patch("app.services.vector_store._get_embedding_function"):
-            resp = client.post("/vector/index", json={"year": 2014})
+            resp = client.post("/api/vector/index", json={"year": 2014})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -185,7 +185,7 @@ def test_vector_index_skipped_when_already_indexed(tmp_path, monkeypatch):
     fc = _mock_client(collection=col)
     with patch("app.services.vector_store._get_client", return_value=fc):
         with patch("app.services.vector_store._get_embedding_function"):
-            resp = client.post("/vector/index", json={"year": 2015})
+            resp = client.post("/api/vector/index", json={"year": 2015})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -209,7 +209,7 @@ def test_vector_index_force_reindex(tmp_path, monkeypatch):
     fc = _mock_client(collection=col)
     with patch("app.services.vector_store._get_client", return_value=fc):
         with patch("app.services.vector_store._get_embedding_function"):
-            resp = client.post("/vector/index", json={"year": 2016, "force": True})
+            resp = client.post("/api/vector/index", json={"year": 2016, "force": True})
 
     assert resp.status_code == 200
     assert resp.json()["skipped"] is False
@@ -218,11 +218,11 @@ def test_vector_index_force_reindex(tmp_path, monkeypatch):
 
 
 def test_vector_index_invalid_year():
-    resp = client.post("/vector/index", json={"year": 2000})
+    resp = client.post("/api/vector/index", json={"year": 2000})
     assert resp.status_code == 422
 
 
-# ── POST /vector/search ───────────────────────────────────────────────────────
+# ── POST /api/vector/search ───────────────────────────────────────────────────────
 
 def test_vector_search_with_year():
     col = _mock_col(count=5)
