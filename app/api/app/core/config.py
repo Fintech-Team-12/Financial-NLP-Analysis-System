@@ -7,12 +7,17 @@ from pathlib import Path
 
 
 class Settings:
+    # ── 프로젝트 루트 경로 (config.py 위치로부터 역산) ─────────────────────────
+    _project_root: Path = Path(__file__).resolve().parents[4]
+
     # ── 데이터 경로 ────────────────────────────────────────────────────────────
-    # Docker: WORKDIR=/workspace, data 볼륨은 /workspace/data 로 마운트됨
-    # 로컬:   프로젝트 루트 기준 data/processed (PYTHONPATH=app/api 로 실행 가정)
-    # 테스트: conftest.py 에서 settings.data_dir 을 임시 경로로 덮어씀
-    # 로컬 실행 시 app/api/ 디렉토리에서 실행되므로 프로젝트 루트 기준으로 경로 설정
-    data_dir: str = os.getenv("DATA_DIR", str(Path(__file__).resolve().parents[4] / "data" / "processed"))
+    data_dir: str = os.getenv("DATA_DIR", str(_project_root / "data" / "processed"))
+
+    # 업로드된 HTML 파일 임시 저장 경로
+    upload_temp_dir: str = os.getenv("UPLOAD_TEMP_DIR", str(_project_root / "data" / "uploads_temp"))
+
+    # pipeline.py 출력 디렉토리 (data/processed/)
+    processed_dir: str = os.getenv("PROCESSED_DIR", str(_project_root / "data" / "processed"))
 
     # ── 동작 모드 ─────────────────────────────────────────────────────────────
     # True  → MockRetriever + MockGenerator (Chroma/Ollama 불필요)
@@ -52,11 +57,25 @@ class Settings:
     # ── JWT & Google OAuth ────────────────────────────────────────────────────────
     jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "my_super_secret_jwt_key")
     jwt_algorithm: str = "HS256"
+    jwt_issuer: str = "financial-nlp-api"          # iss 클레임
+    jwt_audience: str = "financial-nlp-frontend"    # aud 클레임
+    jwt_expiry_seconds: int = 3600                  # 1시간 (기존 7일에서 단축)
     google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "YOUR_GOOGLE_CLIENT_ID_HERE.apps.googleusercontent.com")
 
-    def get_data_path(self, year: int) -> Path:
-        """연도별 processed JSON 파일 경로 반환."""
-        return Path(self.data_dir) / f"삼성전자_audit_report_{year}_structured.json"
+    def get_all_processed_files(self, year: int = None) -> list[Path]:
+        """
+        processed 디렉토리에서 감사보고서 JSON 파일들을 찾아 리스트로 반환합니다.
+        가장 최근 파일이 우선순위를 가질 수 있게 파일명 순으로 정렬합니다.
+
+        Args:
+            year: 특정 연도만 찾을 경우 연도(int), 전체라면 None
+
+        Returns:
+            list[Path]: 검색된 JSON 파일 경로 리스트
+        """
+        pattern = f"*_audit_report_{year if year else '*'}_structured.json"
+        files = list(Path(self.data_dir).glob(pattern))
+        return sorted(files, key=lambda p: p.name)
 
 
 # 모듈 수준 싱글턴 — 테스트에서 settings.data_dir = "..." 으로 직접 덮어쓰기 가능

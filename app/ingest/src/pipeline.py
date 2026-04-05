@@ -938,7 +938,105 @@ def parse_complex_notes(html_content):
 
 
 # ==========================================
-# 3. 메인 파이프라인 함수
+# 3. 단일 파일 파싱 함수 (API 업로드용)
+# ==========================================
+def parse_single_file(file_path: str, processed_dir: str) -> dict:
+    """
+    단일 HTML 파일을 파싱하여 structured JSON으로 변환 후 저장.
+
+    Args:
+        file_path: HTML 파일 경로
+        processed_dir: JSON 저장 디렉토리
+
+    Returns:
+        dict: {
+            "year": str,
+            "company_name": str,
+            "save_path": str,
+            "year_data": dict (파싱된 전체 데이터)
+        }
+    """
+    os.makedirs(processed_dir, exist_ok=True)
+
+    year_match = re.search(r"20\d{2}", os.path.basename(file_path))
+    year = year_match.group() if year_match else "Unknown"
+
+    try:
+        with open(file_path, "r", encoding="cp949") as f:
+            html_content = f.read()
+    except UnicodeDecodeError:
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+
+    soup = BeautifulSoup(html_content, "lxml")
+    try:
+        tables = pd.read_html(io.StringIO(html_content), encoding="cp949")
+    except ValueError:
+        tables = []
+
+    company_name = extract_company_name_from_html(soup)
+    print(
+        f"[{year}년] {os.path.basename(file_path)} 처리 중... (자동인식 회사명: {company_name})"
+    )
+
+    year_data = {year: {"company": company_name}}
+
+    year_data[year].update(parse_intro(soup, company_name=company_name))
+
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "재무상태표",
+            ["유동자산", "유동부채", "이익잉여금"],
+            exclude_keywords=["자본변동표", "손익계산서"],
+        )
+    )
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "손익계산서",
+            ["매출액", "영업이익", "당기순이익"],
+            exclude_keywords=["총포괄손익", "포괄손익계산서", "자본변동표"],
+        )
+    )
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "포괄손익계산서",
+            ["기타포괄", "총포괄"],
+            exclude_keywords=["매출액", "자본금", "자본변동표"],
+        )
+    )
+    year_data[year].update(extract_equity_statement(tables, "자본변동표"))
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "현금흐름표",
+            ["영업활동현금흐름", "투자활동현금흐름"],
+            exclude_keywords=[],
+        )
+    )
+    year_data[year].update(parse_appendix(soup))
+    year_data[year].update(parse_complex_notes(html_content))
+
+    save_path = os.path.join(
+        processed_dir, f"{company_name}_audit_report_{year}_structured.json"
+    )
+    with open(save_path, "w", encoding="utf-8") as f:
+        json.dump(year_data, f, ensure_ascii=False, indent=4)
+
+    print(f"  -> 완료! {save_path} 생성됨.")
+
+    return {
+        "year": year,
+        "company_name": company_name,
+        "save_path": save_path,
+        "year_data": year_data,
+    }
+
+
+# ==========================================
+# 3-1. 배치 파이프라인 함수 (기존 호환)
 # ==========================================
 def run_pipeline(raw_dir: str, processed_dir: str):
     file_list = glob.glob(os.path.join(raw_dir, "*.htm*"))
@@ -953,78 +1051,7 @@ def run_pipeline(raw_dir: str, processed_dir: str):
     )
 
     for file_path in file_list:
-        year_match = re.search(r"20\d{2}", os.path.basename(file_path))
-        year = year_match.group() if year_match else "Unknown"
-
-        try:
-            with open(file_path, "r", encoding="cp949") as f:
-                html_content = f.read()
-        except UnicodeDecodeError:
-            with open(file_path, "r", encoding="utf-8") as f:
-                html_content = f.read()
-
-        soup = BeautifulSoup(html_content, "lxml")
-        try:
-            tables = pd.read_html(io.StringIO(html_content), encoding="cp949")
-        except ValueError:
-            tables = []
-
-        # [추가] 회사명 자동 추출
-        company_name = extract_company_name_from_html(soup)
-        print(
-            f"[{year}년] {os.path.basename(file_path)} 처리 중... (자동인식 회사명: {company_name})"
-        )
-
-        # [수정] JSON 스키마에 회사명 메타데이터 추가
-        year_data = {year: {"company": company_name}}
-
-        # [수정] 추출한 회사명을 parse_intro에 전달
-        year_data[year].update(parse_intro(soup, company_name=company_name))
-
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "재무상태표",
-                ["유동자산", "유동부채", "이익잉여금"],
-                exclude_keywords=["자본변동표", "손익계산서"],
-            )
-        )
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "손익계산서",
-                ["매출액", "영업이익", "당기순이익"],
-                exclude_keywords=["총포괄손익", "포괄손익계산서", "자본변동표"],
-            )
-        )
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "포괄손익계산서",
-                ["기타포괄", "총포괄"],
-                exclude_keywords=["매출액", "자본금", "자본변동표"],
-            )
-        )
-        year_data[year].update(extract_equity_statement(tables, "자본변동표"))
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "현금흐름표",
-                ["영업활동현금흐름", "투자활동현금흐름"],
-                exclude_keywords=[],
-            )
-        )
-        year_data[year].update(parse_appendix(soup))
-        year_data[year].update(parse_complex_notes(html_content))
-
-        # [수정] 저장 파일명에 회사명을 동적으로 반영 (삼성전자 하드코딩 제거)
-        save_path = os.path.join(
-            processed_dir, f"{company_name}_audit_report_{year}_structured.json"
-        )
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(year_data, f, ensure_ascii=False, indent=4)
-
-        print(f"  -> 완료! {save_path} 생성됨.")
+        parse_single_file(file_path, processed_dir)
 
     print("-" * 50 + "\n🎉 전체 파이프라인 처리가 완료되었습니다!")
 
@@ -1048,3 +1075,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

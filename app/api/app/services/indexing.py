@@ -16,7 +16,8 @@ from app.models.document import NormalizedDocument
 # ── In-memory store ───────────────────────────────────────────────────────────
 # doc_id → NormalizedDocument
 _store: dict[str, NormalizedDocument] = {}
-_indexed_years: set[int] = set()
+# 인덱싱 완료된 파일명 세트 (기업별/연도별 중복 방지)
+_indexed_files: set[str] = set()
 
 
 # ── 공개 조회 API ─────────────────────────────────────────────────────────────
@@ -26,7 +27,9 @@ def get_all_documents() -> list[NormalizedDocument]:
 
 
 def get_indexed_years() -> list[int]:
-    return sorted(_indexed_years)
+    """현재 로드된 문서들의 모든 연도를 반환합니다."""
+    years = {d.year for d in _store.values()}
+    return sorted(list(years))
 
 
 def get_document_count() -> int:
@@ -67,54 +70,75 @@ def structured_lookup(year: int, item_name: str) -> Optional[NormalizedDocument]
 
 def ingest_year(year: int, force: bool = False) -> int:
     """
-    지정 연도의 processed JSON 을 읽어 NormalizedDocument 로 변환 후 store 에 저장.
-    반환값: 이번에 새로 인덱싱된 문서 수 (force=False 이고 이미 있으면 0)
+    지정 연도의 모든 processed JSON 파일들을 찾아 인덱싱합니다.
     """
-    if year in _indexed_years and not force:
+    processed_files = settings.get_all_processed_files(year)
+    total_count = 0
+    for file_path in processed_files:
+        total_count += ingest_single_file(file_path, force=force)
+    return total_count
+
+
+def ingest_single_file(file_path: Path, force: bool = False) -> int:
+    """
+    특정 JSON 파일을 읽어 인덱싱합니다.
+    이미 인덱싱된 파일이면 force=True일 때만 재로딩합니다.
+    """
+    file_name = file_path.name
+    if file_name in _indexed_files and not force:
         return 0
 
-    data_path = settings.get_data_path(year)
-    if not Path(data_path).exists():
-        raise FileNotFoundError(f"Processed data not found: {data_path}")
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
 
-    with open(data_path, encoding="utf-8") as f:
+    with open(file_path, encoding="utf-8") as f:
         raw: dict = json.load(f)
 
-    # 최상위 키가 연도 문자열인 경우 ("2023": {...}) 내부로 진입
-    year_data: dict = raw.get(str(year), raw)
+    # 파이프라인에서 생성한 JSON은 { "2024": { "company": "...", "감사보고서": ... } } 구조임
+    # 최상위 키(연도) 추출
+    years_in_file = [k for k in raw.keys() if k.isdigit()]
+    if not years_in_file:
+        return 0
+    
+    year_str = years_in_file[0]
+    year = int(year_str)
+    content_data = raw[year_str]
+    company = content_data.get("company", "UnknownCompany")
 
-    # force 시 해당 연도 문서 먼저 제거
+    # force 시 해당 파일 관련 문서 먼저 제거 (ID에 company가 포함되어 있으므로 안전함)
     if force:
-        for key in [k for k, v in _store.items() if v.year == year]:
+        prefix = f"{company}_"
+        for key in [k for k, v in _store.items() if k.startswith(prefix) and v.year == year]:
             del _store[key]
-        _indexed_years.discard(year)
+        _indexed_files.discard(file_name)
 
     count = 0
-    for section_name, section_data in year_data.items():
+    for section_name, section_data in content_data.items():
         if not isinstance(section_data, dict):
             continue
 
         if section_name == "감사보고서":
-            count += _index_audit_report(year, section_data)
+            count += _index_audit_report(year, company, section_data)
         elif _is_notes_section(section_name):
-            count += _index_notes(year, section_data)
+            count += _index_notes(year, company, section_data)
         elif _is_financial_statement(section_name):
-            count += _index_financial_statement(year, section_name, section_data)
-        else:
-            # 기타 섹션 — content 있으면 단순 저장
+            count += _index_financial_statement(year, company, section_name, section_data)
+        elif section_name != "company":
+            # 기타 섹션
             content = section_data.get("content", "")
             if content:
-                doc = NormalizedDocument(
-                    doc_id=f"{section_name}_{year}",
+                doc_id = f"{company}_{section_name}_{year}"
+                _store[doc_id] = NormalizedDocument(
+                    doc_id=doc_id,
                     doc_type="other",
                     year=year,
+                    company=company,
                     section=section_name,
-                    content=f"[{year}년 {section_name}]\n{content}",
+                    content=f"[{company} {year}년 {section_name}]\n{content}",
                 )
-                _store[doc.doc_id] = doc
                 count += 1
 
-    _indexed_years.add(year)
+    _indexed_files.add(file_name)
     return count
 
 
@@ -131,10 +155,9 @@ def _is_notes_section(name: str) -> bool:
 
 # ── 감사보고서 색인 ───────────────────────────────────────────────────────────
 
-def _index_audit_report(year: int, section_data: dict) -> int:
+def _index_audit_report(year: int, company: str, section_data: dict) -> int:
     """
     감사보고서 sub_sections (감사의견, 핵심감사사항 등) 를 각각 문서로 변환.
-    실제 데이터 구조: {"sub_sections": {"감사의견": {"title":..., "content":...}, ...}}
     """
     count = 0
     for sub_name, sub_data in section_data.get("sub_sections", {}).items():
@@ -143,13 +166,14 @@ def _index_audit_report(year: int, section_data: dict) -> int:
         content = sub_data.get("content", "").strip()
         if not content:
             continue
-        doc_id = f"감사보고서_{year}_{sub_name}"
+        doc_id = f"{company}_감사보고서_{year}_{sub_name}"
         _store[doc_id] = NormalizedDocument(
             doc_id=doc_id,
             doc_type="audit_report",
             year=year,
+            company=company,
             section=sub_name,
-            content=f"[{year}년 {sub_name}]\n{content}",
+            content=f"[{company} {year}년 {sub_name}]\n{content}",
         )
         count += 1
     return count
@@ -157,7 +181,7 @@ def _index_audit_report(year: int, section_data: dict) -> int:
 
 # ── 재무제표 색인 ─────────────────────────────────────────────────────────────
 
-def _index_financial_statement(year: int, section_name: str, section_data: dict) -> int:
+def _index_financial_statement(year: int, company: str, section_name: str, section_data: dict) -> int:
     """
     재무제표 테이블의 각 row 를 문서로 변환.
     실제 데이터 구조: columns = ["과목명","관련주석","당기금액","전기금액"]
@@ -205,7 +229,7 @@ def _index_financial_statement(year: int, section_name: str, section_data: dict)
                         pass
 
             # 검색용 content 생성
-            parts = [f"[{year}년 {section_name}] {item_name}"]
+            parts = [f"[{company} {year}년 {section_name}] {item_name}"]
             if unit:
                 parts.append(f"단위: {unit}")
             if numeric_value:
@@ -213,11 +237,12 @@ def _index_financial_statement(year: int, section_name: str, section_data: dict)
             if related_notes:
                 parts.append(f"관련주석: {', '.join(related_notes)}")
 
-            doc_id = f"{section_name}_{year}_{item_name}"
+            doc_id = f"{company}_{section_name}_{year}_{item_name}"
             _store[doc_id] = NormalizedDocument(
                 doc_id=doc_id,
                 doc_type="financial_statement",
                 year=year,
+                company=company,
                 section=item_name,
                 content="\n".join(parts),
                 numeric_value=numeric_value or None,
@@ -230,13 +255,13 @@ def _index_financial_statement(year: int, section_name: str, section_data: dict)
 
 # ── 주석 색인 ─────────────────────────────────────────────────────────────────
 
-def _index_notes(year: int, section_data: dict) -> int:
+def _index_notes(year: int, company: str, section_data: dict) -> int:
     """주석 sub_sections 를 재귀적으로 순회하며 문서로 변환."""
-    return _index_note_sections(year, section_data.get("sub_sections", {}), parent=None)
+    return _index_note_sections(year, company, section_data.get("sub_sections", {}), parent=None)
 
 
 def _index_note_sections(
-    year: int, sections: dict, parent: Optional[str]
+    year: int, company: str, sections: dict, parent: Optional[str]
 ) -> int:
     count = 0
     for key, data in sections.items():
@@ -253,13 +278,14 @@ def _index_note_sections(
             full_content += "\n" + "\n".join(table_texts)
 
         if full_content.strip():
-            doc_id = f"주석_{year}_{key}"
+            doc_id = f"{company}_주석_{year}_{key}"
             _store[doc_id] = NormalizedDocument(
                 doc_id=doc_id,
                 doc_type="note",
                 year=year,
+                company=company,
                 section=key,
-                content=f"[{year}년 주석 {key} {title}]\n{full_content}",
+                content=f"[{company} {year}년 주석 {key} {title}]\n{full_content}",
                 parent_section=parent,
             )
             count += 1
@@ -267,7 +293,7 @@ def _index_note_sections(
         # 재귀: sub_sections
         sub = data.get("sub_sections", {})
         if sub:
-            count += _index_note_sections(year, sub, parent=key)
+            count += _index_note_sections(year, company, sub, parent=key)
 
     return count
 
