@@ -73,8 +73,8 @@ def test_create_session_without_title(db_session, test_user):
 
 def test_user_can_have_multiple_sessions(db_session, test_user):
     """한 사용자가 여러 세션을 가질 수 있다."""
-    s1 = create_chat_session(db_session, test_user.id, "세션1")
-    s2 = create_chat_session(db_session, test_user.id, "세션2")
+    create_chat_session(db_session, test_user.id, "세션1")
+    create_chat_session(db_session, test_user.id, "세션2")
     db_session.commit()
 
     sessions = list_user_sessions(db_session, test_user.id)
@@ -138,7 +138,7 @@ def test_list_session_messages_order(db_session, test_user):
 
 def test_list_user_sessions_latest_first(db_session, test_user):
     """세션 목록은 최신순으로 반환된다."""
-    s1 = create_chat_session(db_session, test_user.id, "오래된 세션")
+    create_chat_session(db_session, test_user.id, "오래된 세션")
     db_session.commit()
 
     # s2 에 메시지를 추가해서 updated_at 을 갱신

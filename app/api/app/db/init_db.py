@@ -8,7 +8,6 @@ DB 초기화 유틸리티.
     from app.db.init_db import create_tables
     create_tables()
 """
-import sys
 from pathlib import Path
 
 from app.db.base import Base

@@ -1,7 +1,7 @@
 """사용자/OAuth 관련 Pydantic 응답 스키마."""
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 
 class UserRead(BaseModel):

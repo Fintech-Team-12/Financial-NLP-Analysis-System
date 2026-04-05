@@ -15,7 +15,6 @@ def test_qa_startup_auto_ingest(client: TestClient) -> None:
     """startup lifespan 이 자동 ingest 를 실행하므로
     /reports/ingest 를 명시적으로 호출하지 않아도 /qa 가 동작해야 한다.
     (이전 테스트: ingest 없이 503 반환 → startup auto-ingest 도입으로 동작 변경됨)"""
-    from app.services import indexing
     from app.main import app
     from fastapi.testclient import TestClient as TC
 

@@ -22,7 +22,7 @@ def get_chats(
     return [
         {
             "id": s.id,
-            "title": s.title or f"New Chat",
+            "title": s.title or "New Chat",
             "updated_at": s.updated_at.isoformat()
         } for s in sessions
     ]
