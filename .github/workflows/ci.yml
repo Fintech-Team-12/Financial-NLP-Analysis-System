@@ -66,7 +66,7 @@ jobs:
         run: |
           pytest app/ingest/tests --cov=app/ingest/src --cov-report=term-missing
         env:
-          PYTHONPATH: app/ingest
+          PYTHONPATH: .
 
   docker-build:
     runs-on: ubuntu-latest
