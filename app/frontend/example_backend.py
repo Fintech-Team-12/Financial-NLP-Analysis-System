@@ -146,9 +146,15 @@ def google_auth(payload: TokenPayload, db: Session = Depends(get_db)):
     google_token 검증 및 회원가입/로그인 처리
     """
     try:
-        if GOOGLE_CLIENT_ID == "YOUR_GOOGLE_CLIENT_ID_HERE.apps.googleusercontent.com":
-            # 더미 클라이언트 ID가 쓰인 경우 (테스트 모드: 아무 토큰이나 허용)
-            # jwt_decode 를 이용해 프론트에서 받은 google JWT 내용 파싱 시뮬레이션
+        # 🚨 디버깅 통과 로직 추가 🚨
+        if payload.google_token == "dummy_google_credential_for_bypassing_auth":
+            google_info = {
+                "sub": "user_debug_999",
+                "email": "debug_user@example.com",
+                "name": "개발자(Debug)"
+            }
+        elif GOOGLE_CLIENT_ID == "YOUR_GOOGLE_CLIENT_ID_HERE.apps.googleusercontent.com":
+            # 더미 클라이언트 ID가 쓰인 경우 (테스트 모드: 아무 올바른 형식 JWT나 허용)
             decoded = jwt.decode(payload.google_token, options={"verify_signature": False})
             google_info = {
                 "sub": decoded.get("sub", payload.google_token),
