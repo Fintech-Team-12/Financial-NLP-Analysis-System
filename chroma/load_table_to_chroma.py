@@ -3,8 +3,13 @@ from pathlib import Path
 import chromadb
 from chromadb.utils import embedding_functions
 
-SQLITE_DIR = Path("./chroma/sqlite_by_year")
-CHROMA_PATH = "./chroma_store"
+BASE_DIR = Path(__file__).resolve().parent
+
+# 2. 이미지상 sqlite_by_year가 data_process 폴더 안에 있으므로 아래와 같이 설정
+SQLITE_DIR = BASE_DIR / "data_process" / "sqlite_by_year"
+CHROMA_PATH = BASE_DIR / "chroma_store" # chroma 폴더 안에 생성하고 싶다면
+
+print(f"🔍 실제 탐색 경로: {SQLITE_DIR.resolve()}")
 COLLECTION_NAME = "audit_reports_10years_table_minilm"
 
 #배치 사이즈 조정
@@ -76,7 +81,7 @@ def batch_iter(items, batch_size):
 
 
 # 10년치만 넣고 싶으면 2014~2023으로 제한
-TARGET_YEARS = set(range(2014, 2024))
+TARGET_YEARS = set(range(2014, 2025))
 
 db_files = [
     p for p in sorted(SQLITE_DIR.glob("audit_reports_*.db"))
