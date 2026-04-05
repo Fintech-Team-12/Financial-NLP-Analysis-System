@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture(autouse=True)
 def ingest_before_qa(auth_client: TestClient) -> None:
     """이 모듈의 모든 테스트는 2023년 데이터가 인덱싱된 상태에서 실행."""
-    auth_client.post("/api/reports/reports/ingest", json={"year": 2023})
+    auth_client.post("/reports/ingest", json={"year": 2023})
 
 
 # ── 기본 동작 ──────────────────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ def test_qa_startup_auto_ingest(auth_client: TestClient) -> None:
     app.dependency_overrides[get_current_user] = lambda: mock_user
     
     with TC(app) as c:
-        r = c.post("/api/chat/chat", json={"question": "감사의견은?"})
+        r = c.post("/chat", json={"question": "감사의견은?"})
     
     app.dependency_overrides.clear()
     assert r.status_code in (200, 503)
@@ -35,7 +35,7 @@ def test_qa_startup_auto_ingest(auth_client: TestClient) -> None:
 
 def test_qa_response_schema(auth_client: TestClient) -> None:
     """응답에 answer, citations, question_type, used_documents, chat_id 가 있어야 한다."""
-    data = auth_client.post("/api/chat/chat", json={"question": "2023년 감사의견은?", "year": 2023}).json()
+    data = auth_client.post("/chat", json={"question": "2023년 감사의견은?", "year": 2023}).json()
     assert "answer" in data
     assert "citations" in data
     assert "question_type" in data
@@ -49,27 +49,27 @@ def test_qa_response_schema(auth_client: TestClient) -> None:
 
 def test_qa_numeric_type(auth_client: TestClient) -> None:
     """금액 질문은 question_type=numeric 으로 분류되어야 한다."""
-    data = auth_client.post("/api/chat/chat", json={"question": "2023년 매출채권 금액은 얼마?", "year": 2023}).json()
+    data = auth_client.post("/chat", json={"question": "2023년 매출채권 금액은 얼마?", "year": 2023}).json()
     assert data["question_type"] == "numeric"
 
 
 def test_qa_numeric_returns_amount(auth_client: TestClient) -> None:
     """숫자형 질문 응답의 answer 에 금액 정보가 포함되어야 한다."""
-    data = auth_client.post("/api/chat/chat", json={"question": "2023년 매출채권 금액은 얼마?", "year": 2023}).json()
+    data = auth_client.post("/chat", json={"question": "2023년 매출채권 금액은 얼마?", "year": 2023}).json()
     # MockGenerator 는 numeric_value 를 포맷팅해서 반환
     assert data["answer"] != "관련 문서를 찾을 수 없습니다."
 
 
 def test_qa_descriptive_type(auth_client: TestClient) -> None:
     """감사의견 질문은 question_type=descriptive 로 분류되어야 한다."""
-    data = auth_client.post("/api/chat/chat", json={"question": "2023년 감사의견은 무엇인가요?", "year": 2023}).json()
+    data = auth_client.post("/chat", json={"question": "2023년 감사의견은 무엇인가요?", "year": 2023}).json()
     assert data["question_type"] == "descriptive"
 
 
 def test_qa_note_linked_type(auth_client: TestClient) -> None:
     """주석/회계정책 질문은 question_type=note_linked 로 분류되어야 한다."""
     data = auth_client.post(
-        "/api/chat/chat",
+        "/chat",
         json={"question": "매출채권 관련 회계처리 설명해줘", "year": 2023},
     ).json()
     assert data["question_type"] == "note_linked"
@@ -84,7 +84,7 @@ def test_qa_note_linked_finds_note_doc(auth_client: TestClient) -> None:
     주석_2023_5 문서가 citations 에 포함되어야 한다.
     """
     data = auth_client.post(
-        "/api/chat/chat",
+        "/chat",
         json={"question": "매출채권 관련 회계정책 설명", "year": 2023},
     ).json()
     note_doc_ids = [c["doc_id"] for c in data["citations"]]
@@ -96,7 +96,7 @@ def test_qa_note_linked_finds_note_doc(auth_client: TestClient) -> None:
 
 def test_citations_have_required_fields(auth_client: TestClient) -> None:
     """citations 각 항목에 doc_id, year, section, excerpt 가 있어야 한다."""
-    data = auth_client.post("/api/chat/chat", json={"question": "2023년 감사의견", "year": 2023}).json()
+    data = auth_client.post("/chat", json={"question": "2023년 감사의견", "year": 2023}).json()
     for citation in data["citations"]:
         assert "doc_id" in citation
         assert "year" in citation
@@ -106,5 +106,5 @@ def test_citations_have_required_fields(auth_client: TestClient) -> None:
 
 def test_qa_without_year_field(auth_client: TestClient) -> None:
     """year 필드 없이도 질문이 처리되어야 한다."""
-    response = auth_client.post("/api/chat/chat", json={"question": "감사의견은?"})
+    response = auth_client.post("/chat", json={"question": "감사의견은?"})
     assert response.status_code == 200

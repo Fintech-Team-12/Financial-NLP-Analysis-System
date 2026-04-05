@@ -71,29 +71,29 @@ def real_client():
 
 class TestVectorHealthIntegration:
     def test_status_code(self, real_client):
-        resp = real_client.get("/api/vector/health")
+        resp = real_client.get("/vector/health")
         assert resp.status_code == 200
 
     def test_store_is_ok(self, real_client):
-        data = real_client.get("/api/vector/health").json()
+        data = real_client.get("/vector/health").json()
         assert data["store"] == "ok", (
             f"store 가 'ok' 가 아닙니다: {data.get('error', data)}"
         )
 
     def test_response_schema(self, real_client):
-        data = real_client.get("/api/vector/health").json()
+        data = real_client.get("/vector/health").json()
         for key in ("store", "indexed_years", "empty_years", "missing_years", "collection_stats"):
             assert key in data, f"응답에 '{key}' 필드가 없습니다"
 
     def test_has_indexed_years(self, real_client):
-        data = real_client.get("/api/vector/health").json()
+        data = real_client.get("/vector/health").json()
         assert len(data["indexed_years"]) > 0, (
             "indexed_years 가 비어 있습니다. 컬렉션이 적재되지 않았습니다."
         )
 
     def test_2014_is_indexed(self, real_client):
         """현재 로컬에 audit_reports_2014 컬렉션이 적재되어 있어야 한다."""
-        data = real_client.get("/api/vector/health").json()
+        data = real_client.get("/vector/health").json()
         assert 2014 in data["indexed_years"], (
             f"2014 가 indexed_years 에 없습니다: {data['indexed_years']}"
         )
@@ -101,7 +101,7 @@ class TestVectorHealthIntegration:
 
     def test_collection_stats_has_collections(self, real_client):
         """collection_stats 키가 10년치 컬렉션명이어야 한다."""
-        data = real_client.get("/api/vector/health").json()
+        data = real_client.get("/vector/health").json()
         assert _COLLECTION_TEXT in data["collection_stats"], (
             f"collection_stats 에 '{_COLLECTION_TEXT}' 키가 없습니다: {list(data['collection_stats'].keys())}"
         )
@@ -112,7 +112,7 @@ class TestVectorHealthIntegration:
         정확한 건수는 팀원 로딩 스크립트 재실행 시 변할 수 있으므로 하드코딩하지 않는다.
         (로컬 확인 기준: text=1643건, table=1436건)
         """
-        data = real_client.get("/api/vector/health").json()
+        data = real_client.get("/vector/health").json()
         stats = data["collection_stats"]
         assert stats.get(_COLLECTION_TEXT, 0) >= 1000, (
             f"text 컬렉션 1000건 미만: {stats.get(_COLLECTION_TEXT, 0)}"
@@ -218,14 +218,14 @@ class TestVectorSearchIntegration:
         2014-2024 범위 안에 있어야 한다.
         (구 테스트: year=2020 미적재 가정 → 10년치 컬렉션 도입으로 전 연도 적재됨)
         """
-        data = real_client.get("/api/vector/health").json()
+        data = real_client.get("/vector/health").json()
         for year in data["indexed_years"]:
             assert 2014 <= year <= 2024, f"indexed_years 에 범위 밖 연도 포함: {year}"
 
     def test_multiple_queries_consistent(self, real_client):
         """같은 질의를 두 번 호출하면 동일한 결과를 반환해야 한다."""
         payload = {"query": "재고자산", "year": 2014, "top_k": 3}
-        r1 = real_client.post("/api/vector/search", json=payload).json()
-        r2 = real_client.post("/api/vector/search", json=payload).json()
+        r1 = real_client.post("/vector/search", json=payload).json()
+        r2 = real_client.post("/vector/search", json=payload).json()
         assert r1["count"] == r2["count"]
         assert [r["id"] for r in r1["results"]] == [r["id"] for r in r2["results"]]
