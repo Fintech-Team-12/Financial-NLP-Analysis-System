@@ -22,6 +22,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: app/frontend/package.json
+
       - name: Cache pip
         uses: actions/cache@v4
         with:
@@ -37,6 +44,12 @@ jobs:
           pip install -r app/ingest/requirements.txt
           pip install ruff pytest-cov
 
+      - name: Frontend build check
+        run: |
+          cd app/frontend
+          npm install
+          npm run build
+
       - name: Ruff API
         run: ruff check app/api/app app/api/tests
         
@@ -47,14 +60,7 @@ jobs:
         run: pytest app/api/tests --cov=app/api/app --cov-report=term-missing
         env:
           PYTHONPATH: app/api
-          MOCK_MODE: "true"   # CI 에서는 항상 mock 모드 (Chroma/Ollama 불필요)
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: .coverage
+          MOCK_MODE: "true"
 
       - name: Pytest Ingest
         run: |
