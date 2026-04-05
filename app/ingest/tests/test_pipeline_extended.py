@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 from bs4 import BeautifulSoup
 
-from src.pipeline import (
+from app.ingest.src.pipeline import (
     clean_amount,
     clean_account,
     clean_note,
