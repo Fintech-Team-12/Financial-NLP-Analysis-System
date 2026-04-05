@@ -82,7 +82,7 @@ SAMPLE_DATA = {
 def sample_data_dir(tmp_path_factory: pytest.TempPathFactory) -> str:
     """세션당 1회 생성되는 임시 JSON 파일 디렉토리."""
     data_dir: Path = tmp_path_factory.mktemp("data")
-    file_path = data_dir / "samsung_audit_report_2023_structured.json"
+    file_path = data_dir / "삼성전자_audit_report_2023_structured.json"
     file_path.write_text(json.dumps(SAMPLE_DATA, ensure_ascii=False), encoding="utf-8")
     return str(data_dir)
 

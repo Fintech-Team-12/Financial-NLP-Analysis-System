@@ -159,7 +159,10 @@ class ChromaRetriever(RetrieverBase):
     ) -> list[NormalizedDocument]:
         from app.services import vector_store
 
-        data = vector_store.search(query, year=year, top_k=top_k)
+        # doc_type 필터는 post-retrieval 이므로, 필터 후에도 top_k 개가 남도록
+        # 더 많은 후보를 가져온다 (NUMERIC / NOTE_LINKED fallback 경로에서 사용).
+        fetch_k = top_k * 3 if doc_type is not None else top_k
+        data = vector_store.search(query, year=year, top_k=fetch_k)
         docs = [
             _chunk_to_normalized(chunk, year or 0)
             for chunk in data["results"]

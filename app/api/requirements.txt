@@ -11,6 +11,9 @@ sqlalchemy==2.0.41
 # ── HTTP client (FastAPI TestClient transport + 추후 Ollama 호출) ─────────────
 httpx==0.28.1
 
+# ── Anthropic Claude API (ANTHROPIC_API_KEY 설정 시 ClaudeGenerator 활성) ─────
+anthropic>=0.40.0
+
 # ── Vector DB (mock_mode=False 시 ChromaRetriever 에서 사용) ──────────────────
 chromadb==0.5.23
 
