@@ -76,7 +76,7 @@ def make_chunk_id(doc_id: str, order_index: Any) -> str:
     digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:8]
     return f"{doc_id}_{digest}"
 
-
+'''
 def extract_amount_unit(raw_unit: str) -> str | None:
     """
     "(단위: 원)" -> "원"
@@ -92,7 +92,27 @@ def extract_amount_unit(raw_unit: str) -> str | None:
 
     cleaned = raw_unit.replace("(", "").replace(")", "").strip()
     return cleaned or None
+'''
 
+def extract_amount_unit(raw_unit: str) -> str | None:
+    """
+    "(단위: 원)" -> "원"
+    "(단위: 주, 원)" -> "주, 원"  # 🟢 복합 단위 대응
+    """
+    if not raw_unit:
+        return None
+
+    raw_unit = str(raw_unit).strip()
+    
+    # 1. '단위' 키워드 뒤의 내용을 추출 (반각 : 및 전각 ： 모두 대응)
+    match = re.search(r"단위\s*[:：]\s*([^)]+)", raw_unit)
+    if match:
+        return match.group(1).strip()
+
+    # 2. '단위'라는 글자가 없더라도 괄호 안의 내용만 깔끔하게 추출
+    cleaned = raw_unit.replace("(", "").replace(")", "").replace("단위", "").replace(":", "").replace("：", "").strip()
+    
+    return cleaned or None
 
 # =========================================================
 # 구조 ID 재생성
@@ -458,7 +478,7 @@ def build_table_text_for_embedding(rec: dict) -> str:
         pieces.append(content_text)
 
     return "\n".join(pieces).strip()
-
+'''
 def build_text_for_embedding(rec: dict) -> str:
     year = clean_field(rec.get("year", ""))
     company = clean_field(rec.get("company", ""))
@@ -518,6 +538,58 @@ def build_text_for_embedding(rec: dict) -> str:
         pieces.append(content_text)
 
     return "\n".join(pieces).strip()
+'''
+def build_text_for_embedding(rec: dict) -> str:
+    year = clean_field(rec.get("year", ""))
+    company = clean_field(rec.get("company", ""))
+    report_type = clean_field(rec.get("report_type", ""))
+    top_section = clean_field(rec.get("top_section", ""))
+    section_title = clean_field(rec.get("section_title", ""))
+    note_number = clean_field(rec.get("note_number", ""))
+    content_text = clean_field(rec.get("content_text", ""))
+    content_type = clean_field(rec.get("content_type", ""))
+    amount_unit = clean_field(rec.get("amount_unit", ""))
+    section_path = normalize_path(rec.get("section_path", ""))
+
+    text_type = infer_text_type(rec)
+
+    header_parts = []
+
+    # 1. 최우선 식별자: 누구의 어떤 보고서인지 명확히!
+    if company and year:
+        header_parts.append(f"[{company} {year}년 {report_type}]")
+    
+    # 2. 핵심 항목: 은정님이 정제한 그 제목!
+    if section_title:
+        header_parts.append(section_title)
+
+    # 3. 보조 정보: 주석 번호나 섹션 유형 (중복 피하기)
+    if note_number:
+        header_parts.append(f"주석 {note_number}")
+    elif top_section and top_section not in section_title:
+        header_parts.append(top_section)
+
+    header = " | ".join([p for p in header_parts if p])
+
+    meta_parts = []
+    if section_path:
+        meta_parts.append(f"경로: {section_path}")
+    if content_type:
+        meta_parts.append(f"유형: {content_type}")
+    if amount_unit:
+        meta_parts.append(f"단위: {amount_unit}")
+
+    pieces = []
+    if header:
+        pieces.append(header)
+    if meta_parts:
+        pieces.append(" | ".join(meta_parts))
+    if content_text:
+        pieces.append(content_text)
+
+    return "\n".join(pieces).strip()
+
+
 
 # =========================================================
 # 메인 enrich
@@ -587,6 +659,7 @@ def enrich_records(records: list[dict]) -> list[dict]:
 
     print(f"최종 enriched 레코드 수: {len(enriched)}", file=sys.stderr)
     return enriched
+
 
 
 # =========================================================

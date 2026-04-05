@@ -2,7 +2,7 @@ import json
 import pytest
 import pandas as pd
 import numpy as np
-from src.pipeline import (
+from app.ingest.src.pipeline import (
     clean_amount,
     clean_account,
     clean_note,
