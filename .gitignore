@@ -1,2 +1,9 @@
-.env
 .DS_Store
+chroma/.DS_Store
+chroma/flattened_data/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+chroma_store/
+chroma_db/
