@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.vector_store import _COLLECTION_TABLE, _COLLECTION_TEXT
 
 client = TestClient(app)
 
@@ -23,8 +24,11 @@ def _mock_col(count: int = 0, query_result: dict | None = None):
     col.query.return_value = query_result or {
         "ids": [["chunk_abc"]],
         "documents": [["2014년 감사보고서 내용"]],
-        "metadatas": [[{"year": 2014, "section_title": "감사의견", "company": "삼성전자",
-                        "content_type": "text", "section_path": "감사의견", "report_type": "감사보고서"}]],
+        "metadatas": [[{
+            "year": 2014, "section_title": "감사의견", "company": "삼성전자",
+            "content_type": "text", "top_section": "감사보고서",
+            "section_path": "감사보고서 > 감사의견", "report_type": "감사보고서",
+        }]],
         "distances": [[0.05]],
     }
     return col
@@ -72,10 +76,20 @@ def test_vector_health_store_empty_no_collections():
 
 
 def test_vector_health_partial_indexing():
-    """2014만 인덱싱된 경우 나머지 10개 연도는 missing_years 에 포함."""
-    col_2014 = _mock_col(count=1523)
-    fc = _mock_client(collection_names=["audit_reports_2014"])
-    fc.get_collection.return_value = col_2014
+    """text 컬렉션에 2014년 데이터만 있으면 indexed_years=[2014], missing_years 10개."""
+    col_text = _mock_col(count=1523)
+
+    # text 컬렉션의 year where 필터 응답 mock: 2014만 존재, 나머지는 없음
+    def mock_get(**kwargs):
+        where = kwargs.get("where", {})
+        if where.get("year") == 2014:
+            return {"ids": ["chunk_2014"]}
+        return {"ids": []}
+
+    col_text.get.side_effect = mock_get
+
+    fc = _mock_client(collection_names=[_COLLECTION_TEXT])
+    fc.get_collection.return_value = col_text
 
     with patch("app.services.vector_store._get_client", return_value=fc):
         resp = client.get("/vector/health")
@@ -85,21 +99,22 @@ def test_vector_health_partial_indexing():
     assert data["store"] == "ok"
     assert data["indexed_years"] == [2014]
     assert len(data["missing_years"]) == 10
-    assert data["collection_stats"]["2014"] == 1523
+    assert data["collection_stats"][_COLLECTION_TEXT] == 1523
 
 
-def test_vector_health_empty_collection():
-    """컬렉션은 있지만 count=0 → empty_years 에 포함."""
+def test_vector_health_text_collection_empty():
+    """text 컬렉션이 존재하지만 count=0이면 전 연도가 missing_years에 포함."""
     col_empty = _mock_col(count=0)
-    fc = _mock_client(collection_names=["audit_reports_2018"])
+    fc = _mock_client(collection_names=[_COLLECTION_TEXT])
     fc.get_collection.return_value = col_empty
 
     with patch("app.services.vector_store._get_client", return_value=fc):
         resp = client.get("/vector/health")
 
     data = resp.json()
-    assert 2018 in data["empty_years"]
-    assert 2018 not in data["indexed_years"]
+    assert data["indexed_years"] == []
+    assert len(data["missing_years"]) == 11
+    assert data["collection_stats"][_COLLECTION_TEXT] == 0
 
 
 def test_vector_health_response_schema():
@@ -132,14 +147,16 @@ def test_vector_index_ok(tmp_path, monkeypatch):
         json.dumps([{
             "chunk_id": "c1", "embedding_text": "삼성전자 2014년 감사의견",
             "year": 2014, "company": "삼성전자", "report_type": "감사보고서",
-            "section_path": "감사의견", "section_title": "감사의견", "content_type": "text",
+            "section_path": "감사보고서 > 감사의견", "section_title": "감사의견",
+            "content_type": "text", "top_section": "감사보고서",
         }]),
         encoding="utf-8",
     )
     monkeypatch.setattr(cfg.settings, "chroma_enriched_data_dir", str(tmp_path))
 
     col = MagicMock()
-    col.count.side_effect = [0, 1]  # pre-check=0, post-add=1
+    col.count.return_value = 1           # 적재 후 총 건수
+    col.get.return_value = {"ids": []}   # year=2014 아직 미인덱싱 → 스킵 안 함
     fc = _mock_client(collection=col)
     with patch("app.services.vector_store._get_client", return_value=fc):
         with patch("app.services.vector_store._get_embedding_function"):
@@ -147,7 +164,7 @@ def test_vector_index_ok(tmp_path, monkeypatch):
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["collection"] == "audit_reports_2014"
+    assert data["collection"] == _COLLECTION_TEXT   # 연도별 컬렉션이 아닌 통합 컬렉션
     assert data["skipped"] is False
     assert data["indexed"] == 1
 
@@ -163,7 +180,8 @@ def test_vector_index_skipped_when_already_indexed(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg.settings, "chroma_enriched_data_dir", str(tmp_path))
 
     col = MagicMock()
-    col.count.return_value = 10  # 이미 10건 인덱싱됨
+    col.count.return_value = 10
+    col.get.return_value = {"ids": ["existing_chunk"]}  # year=2015 이미 존재 → 스킵
     fc = _mock_client(collection=col)
     with patch("app.services.vector_store._get_client", return_value=fc):
         with patch("app.services.vector_store._get_embedding_function"):
@@ -186,7 +204,8 @@ def test_vector_index_force_reindex(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg.settings, "chroma_enriched_data_dir", str(tmp_path))
 
     col = MagicMock()
-    col.count.side_effect = [0, 1]
+    col.count.return_value = 1
+    col.get.return_value = {"ids": ["old_chunk_2016"]}  # 기존 year=2016 청크
     fc = _mock_client(collection=col)
     with patch("app.services.vector_store._get_client", return_value=fc):
         with patch("app.services.vector_store._get_embedding_function"):
@@ -194,7 +213,8 @@ def test_vector_index_force_reindex(tmp_path, monkeypatch):
 
     assert resp.status_code == 200
     assert resp.json()["skipped"] is False
-    fc.delete_collection.assert_called_once_with(name="audit_reports_2016")
+    # 컬렉션 전체 삭제 대신 해당 연도 청크만 삭제
+    col.delete.assert_called_once_with(ids=["old_chunk_2016"])
 
 
 def test_vector_index_invalid_year():
@@ -206,7 +226,8 @@ def test_vector_index_invalid_year():
 
 def test_vector_search_with_year():
     col = _mock_col(count=5)
-    fc = _mock_client(collection_names=["audit_reports_2014"], collection=col)
+    col.get.return_value = {"ids": ["chunk_abc"]}   # year=2014 데이터 존재 확인
+    fc = _mock_client(collection_names=[_COLLECTION_TEXT], collection=col)
     with patch("app.services.vector_store._get_client", return_value=fc):
         with patch("app.services.vector_store._get_embedding_function"):
             resp = client.post("/vector/search", json={"query": "감사의견", "year": 2014})
@@ -222,7 +243,7 @@ def test_vector_search_with_year():
 
 
 def test_vector_search_missing_year_returns_warning():
-    """요청 연도 컬렉션 미존재 → results=[], warnings 에 안내 메시지."""
+    """컬렉션 자체가 없으면 results=[], warnings 에 안내 메시지."""
     fc = _mock_client(collection_names=[])  # 아무 컬렉션도 없음
     with patch("app.services.vector_store._get_client", return_value=fc):
         resp = client.post("/vector/search", json={"query": "감사의견", "year": 2022})
@@ -232,7 +253,8 @@ def test_vector_search_missing_year_returns_warning():
     assert data["count"] == 0
     assert data["results"] == []
     assert len(data["warnings"]) > 0
-    assert "audit_reports_2022" in data["warnings"][0]
+    # 컬렉션 이름이 경고 메시지에 포함됨
+    assert _COLLECTION_TEXT in data["warnings"][0] or _COLLECTION_TABLE in data["warnings"][0]
 
 
 def test_vector_search_no_collections_returns_warning():
@@ -248,12 +270,13 @@ def test_vector_search_no_collections_returns_warning():
 
 
 def test_vector_search_all_years():
+    """year=None이면 text, table 두 컬렉션 모두 조회 → 결과 합산."""
     col = _mock_col(count=3)
-    mc14 = MagicMock(); mc14.name = "audit_reports_2014"
-    mc15 = MagicMock(); mc15.name = "audit_reports_2015"
-    fc = MagicMock()
-    fc.list_collections.return_value = [mc14, mc15]
-    fc.get_collection.return_value = col
+    # year=None → get() 호출 없음, query() 만 호출
+    fc = _mock_client(
+        collection_names=[_COLLECTION_TEXT, _COLLECTION_TABLE],
+        collection=col,
+    )
 
     with patch("app.services.vector_store._get_client", return_value=fc):
         with patch("app.services.vector_store._get_embedding_function"):
@@ -268,13 +291,14 @@ def test_vector_search_all_years():
 def test_vector_search_sorted_by_distance():
     col = MagicMock()
     col.count.return_value = 5
+    col.get.return_value = {"ids": ["c1"]}   # year=2018 데이터 존재 확인
     col.query.return_value = {
         "ids": [["c1", "c2"]],
         "documents": [["doc1", "doc2"]],
         "metadatas": [[{"section_title": "A", "year": 2018}, {"section_title": "B", "year": 2018}]],
         "distances": [[0.8, 0.2]],  # c2 가 더 가깝다
     }
-    fc = _mock_client(collection_names=["audit_reports_2018"], collection=col)
+    fc = _mock_client(collection_names=[_COLLECTION_TEXT], collection=col)
     with patch("app.services.vector_store._get_client", return_value=fc):
         with patch("app.services.vector_store._get_embedding_function"):
             resp = client.post("/vector/search", json={"query": "법인세", "year": 2018})
@@ -285,10 +309,8 @@ def test_vector_search_sorted_by_distance():
 
 
 def test_vector_search_chroma_error_returns_warning():
-    """특정 컬렉션 조회 중 예외 → warnings 포함, 나머지 결과는 반환."""
-    mc = MagicMock(); mc.name = "audit_reports_2019"
-    fc = MagicMock()
-    fc.list_collections.return_value = [mc]
+    """컬렉션 조회 중 예외 → warnings 포함."""
+    fc = _mock_client(collection_names=[_COLLECTION_TEXT])
     fc.get_collection.side_effect = Exception("connection reset")
 
     with patch("app.services.vector_store._get_client", return_value=fc):
@@ -297,7 +319,7 @@ def test_vector_search_chroma_error_returns_warning():
 
     data = resp.json()
     assert data["count"] == 0
-    assert any("audit_reports_2019" in w for w in data["warnings"])
+    assert any(_COLLECTION_TEXT in w for w in data["warnings"])
 
 
 def test_vector_search_invalid_year():
@@ -324,10 +346,11 @@ def test_chroma_retriever_returns_normalized_documents():
                 "year": 2014,
                 "section_title": "감사의견",
                 "content_type": "text",
-                "section_path": "감사보고서 > 감사의견",  # → doc_type="audit_report"
+                "top_section": "감사보고서",            # top_section 우선 사용
+                "section_path": "감사보고서 > 감사의견",  # fallback 용도
             },
             "distance": 0.1,
-            "collection": "audit_reports_2014",
+            "collection": _COLLECTION_TEXT,
         }],
         "warnings": [],
     }
@@ -341,24 +364,28 @@ def test_chroma_retriever_returns_normalized_documents():
     assert doc.doc_id == "chunk_001"
     assert doc.year == 2014
     assert doc.section == "감사의견"
-    assert doc.doc_type == "audit_report"   # section_path 첫 세그먼트 "감사보고서" → audit_report
+    assert doc.doc_type == "audit_report"   # top_section "감사보고서" → audit_report
     assert "적정" in doc.content
     assert doc.numeric_value is None
     assert doc.related_notes == []
 
 
 def test_chroma_retriever_doc_type_filter():
-    """ChromaRetriever 가 section_path 기반 doc_type 후처리 필터를 적용하는지 확인."""
+    """ChromaRetriever 가 top_section 기반 doc_type 후처리 필터를 적용하는지 확인."""
     from app.services.retrieval import ChromaRetriever
 
     mock_result = {
         "results": [
-            # section_path "감사보고서 > ..." → doc_type="audit_report"
-            {"id": "c1", "document": "감사의견 텍스트", "metadata": {"year": 2020, "section_title": "감사의견",
-             "content_type": "text", "section_path": "감사보고서 > 감사의견"}, "distance": 0.1, "collection": "x"},
-            # section_path "주석 > ..." → doc_type="note"
-            {"id": "c2", "document": "주석 내용", "metadata": {"year": 2020, "section_title": "재고자산",
-             "content_type": "text", "section_path": "주석 > 8"}, "distance": 0.2, "collection": "x"},
+            # top_section "감사보고서" → doc_type="audit_report"
+            {"id": "c1", "document": "감사의견 텍스트", "metadata": {
+                "year": 2020, "section_title": "감사의견", "content_type": "text",
+                "top_section": "감사보고서", "section_path": "감사보고서 > 감사의견",
+            }, "distance": 0.1, "collection": _COLLECTION_TEXT},
+            # top_section "주석" → doc_type="note"
+            {"id": "c2", "document": "주석 내용", "metadata": {
+                "year": 2020, "section_title": "재고자산", "content_type": "text",
+                "top_section": "주석", "section_path": "주석 > 8",
+            }, "distance": 0.2, "collection": _COLLECTION_TEXT},
         ],
         "warnings": [],
     }

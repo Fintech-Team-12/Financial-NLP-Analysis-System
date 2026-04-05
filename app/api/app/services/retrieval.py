@@ -12,14 +12,19 @@ ChromaRetriever: ChromaDB 의미 유사도 검색 (MOCK_MODE=false)
 
 ## ChromaRetriever → NormalizedDocument 변환
   ChromaDB 메타데이터 필드 매핑:
-    chunk_id (id)      → doc_id
-    content_type       → doc_type
-    year               → year
-    section_title      → section
-    embedding_text     → content
-    section_path       → parent_section
-    numeric_value      → None  (ChromaDB 에 미저장)
-    related_notes      → []    (ChromaDB 에 미저장)
+    chunk_id (id)  → doc_id
+    top_section    → doc_type (없으면 section_path 첫 세그먼트로 추론)
+    year           → year
+    section_title  → section
+    embedding_text → content
+    section_path   → parent_section
+    numeric_value  → None  (ChromaDB 에 미저장)
+    related_notes  → []    (ChromaDB 에 미저장)
+
+## note_number 검색
+  ChromaDB 메타데이터에 note_number 필드가 실제 저장됨.
+  search_by_note_ids() 는 임베딩 유사도 검색 대신
+  note_number + year exact filter 로 정확하게 조회한다.
 """
 from abc import ABC, abstractmethod
 
@@ -103,33 +108,37 @@ _SECTION_PATH_TO_DOC_TYPE: dict[str, str] = {
 }
 
 
-def _infer_doc_type(section_path: str) -> str:
+def _infer_doc_type(meta: dict) -> str:
     """
-    ChromaDB section_path 의 첫 번째 세그먼트로 doc_type 결정.
-    qa.py 가 사용하는 doc_type 값계(audit_report/note/financial_statement)와 매핑.
+    메타데이터에서 doc_type 결정.
+
+    우선순위:
+      1. top_section 필드 — 팀원 적재 스크립트가 직접 저장한 최상위 섹션명
+      2. section_path 첫 세그먼트 — top_section 미존재 시 폴백 (레거시/mock 호환)
     """
-    top = section_path.split(" > ")[0].strip() if section_path else ""
+    top = meta.get("top_section") or (
+        meta.get("section_path", "").split(" > ")[0].strip()
+    )
     return _SECTION_PATH_TO_DOC_TYPE.get(top, "other")
 
 
 def _chunk_to_normalized(chunk: dict, default_year: int) -> NormalizedDocument:
     """
-    vector_store.search() 결과 1건 → NormalizedDocument 변환.
+    vector_store.search() / chromadb get() 결과 1건 → NormalizedDocument 변환.
 
-    doc_type: ChromaDB section_path 첫 세그먼트로 결정 (content_type 은 text/table 이라 부적합).
-    numeric_value 와 related_notes 는 ChromaDB 에 저장되지 않아 None/[].
+    doc_type : top_section 또는 section_path 첫 세그먼트로 결정.
+    numeric_value, related_notes : ChromaDB 에 미저장 → None / [].
     """
     meta = chunk.get("metadata", {})
-    section_path = meta.get("section_path", "")
     return NormalizedDocument(
         doc_id=chunk["id"],
-        doc_type=_infer_doc_type(section_path),
+        doc_type=_infer_doc_type(meta),
         year=int(meta.get("year", default_year)),
         section=meta.get("section_title", ""),
         content=chunk.get("document", ""),
         numeric_value=None,
         related_notes=[],
-        parent_section=section_path,
+        parent_section=meta.get("section_path", ""),
     )
 
 
@@ -156,7 +165,6 @@ class ChromaRetriever(RetrieverBase):
             for chunk in data["results"]
         ]
 
-        # doc_type 필터: ChromaDB 메타데이터 content_type 으로 후처리
         if doc_type is not None:
             docs = [d for d in docs if d.doc_type == doc_type]
 
@@ -168,24 +176,51 @@ class ChromaRetriever(RetrieverBase):
         year: int,
     ) -> list[NormalizedDocument]:
         """
-        ChromaDB 에는 note_number 메타데이터가 없어 where 필터 불가.
-        각 note ID 를 텍스트 쿼리로 변환하여 임베딩 검색으로 대체.
+        note_number 메타데이터 exact filter 로 주석 청크 직접 조회.
 
-        한계: 동음이의 주석 번호에서 오검색 가능.
-        정확한 주석 검색이 필요하면 팀원 스크립트에서
-        note_number 를 ChromaDB 메타데이터로 추가해야 한다.
+        팀원 적재 스크립트가 note_number 를 ChromaDB 메타데이터에 실제 저장하므로
+        임베딩 유사도 검색 대신 정확한 메타데이터 필터를 사용한다.
+        text / table 두 컬렉션 모두 조회하여 중복 제거 후 반환.
         """
         from app.services import vector_store
+
+        try:
+            chroma_client = vector_store._get_client()
+            existing = {c.name for c in chroma_client.list_collections()}
+        except Exception:
+            return []
 
         seen_ids: set[str] = set()
         results: list[NormalizedDocument] = []
 
-        for note_id in note_ids:
-            data = vector_store.search(f"주석 {note_id}", year=year, top_k=2)
-            for chunk in data["results"]:
-                if chunk["id"] not in seen_ids:
-                    seen_ids.add(chunk["id"])
-                    results.append(_chunk_to_normalized(chunk, year))
+        for cname in [vector_store._COLLECTION_TEXT, vector_store._COLLECTION_TABLE]:
+            if cname not in existing:
+                continue
+            try:
+                col = chroma_client.get_collection(name=cname)
+                for note_id in note_ids:
+                    where = {
+                        "$and": [
+                            {"note_number": {"$eq": str(note_id)}},
+                            {"year": {"$eq": year}},
+                        ]
+                    }
+                    res = col.get(where=where, include=["documents", "metadatas"])
+                    for chunk_id, doc, meta in zip(
+                        res["ids"],
+                        res.get("documents") or [],
+                        res.get("metadatas") or [],
+                    ):
+                        if chunk_id not in seen_ids:
+                            seen_ids.add(chunk_id)
+                            results.append(
+                                _chunk_to_normalized(
+                                    {"id": chunk_id, "document": doc, "metadata": meta},
+                                    year,
+                                )
+                            )
+            except Exception:
+                continue
 
         return results
 

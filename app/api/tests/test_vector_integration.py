@@ -28,6 +28,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.vector_store import _COLLECTION_TABLE, _COLLECTION_TEXT
 
 # ── 경로 설정 ─────────────────────────────────────────────────────────────────
 # 이 파일 기준으로 프로젝트 루트를 계산.
@@ -98,17 +99,27 @@ class TestVectorHealthIntegration:
         )
         assert 2014 not in data["missing_years"]
 
-    def test_collection_stats_has_2014(self, real_client):
+    def test_collection_stats_has_collections(self, real_client):
+        """collection_stats 키가 10년치 컬렉션명이어야 한다."""
         data = real_client.get("/vector/health").json()
-        assert "2014" in data["collection_stats"], "collection_stats 에 2014 키가 없습니다"
-        doc_count = data["collection_stats"]["2014"]
-        assert doc_count > 0, f"2014 컬렉션 문서 수가 0 입니다: {doc_count}"
+        assert _COLLECTION_TEXT in data["collection_stats"], (
+            f"collection_stats 에 '{_COLLECTION_TEXT}' 키가 없습니다: {list(data['collection_stats'].keys())}"
+        )
+        assert data["collection_stats"][_COLLECTION_TEXT] > 0
 
-    def test_2014_doc_count(self, real_client):
-        """audit_reports_2014 에 285개의 청크가 적재되어 있어야 한다."""
+    def test_collection_doc_counts(self, real_client):
+        """text / table 컬렉션 모두 1000건 이상 적재되어 있어야 한다.
+        정확한 건수는 팀원 로딩 스크립트 재실행 시 변할 수 있으므로 하드코딩하지 않는다.
+        (로컬 확인 기준: text=1643건, table=1436건)
+        """
         data = real_client.get("/vector/health").json()
-        count = data["collection_stats"].get("2014", 0)
-        assert count == 285, f"예상 문서 수 285, 실제: {count}"
+        stats = data["collection_stats"]
+        assert stats.get(_COLLECTION_TEXT, 0) >= 1000, (
+            f"text 컬렉션 1000건 미만: {stats.get(_COLLECTION_TEXT, 0)}"
+        )
+        assert stats.get(_COLLECTION_TABLE, 0) >= 1000, (
+            f"table 컬렉션 1000건 미만: {stats.get(_COLLECTION_TABLE, 0)}"
+        )
 
 
 # ── POST /vector/search ───────────────────────────────────────────────────────
@@ -167,10 +178,11 @@ class TestVectorSearchIntegration:
         assert "section_title" in meta
 
     def test_result_collection_name(self, real_client):
+        """결과 컬렉션명이 10년치 통합 컬렉션 중 하나여야 한다."""
         data = real_client.post(
             "/vector/search", json={"query": "감사의견", "year": 2014}
         ).json()
-        assert data["results"][0]["collection"] == "audit_reports_2014"
+        assert data["results"][0]["collection"] in (_COLLECTION_TEXT, _COLLECTION_TABLE)
 
     def test_result_document_is_nonempty(self, real_client):
         data = real_client.post(
@@ -200,18 +212,15 @@ class TestVectorSearchIntegration:
         ).json()
         assert len(data["results"]) <= 3
 
-    def test_warning_for_unindexed_year(self, real_client):
+    def test_all_indexed_years_in_valid_range(self, real_client):
         """
-        적재되지 않은 연도(2015~2024)를 요청하면
-        results=[] 이고 warnings 에 안내 메시지가 포함되어야 한다.
+        10년치 컬렉션이 적재된 환경에서 indexed_years 가 모두
+        2014-2024 범위 안에 있어야 한다.
+        (구 테스트: year=2020 미적재 가정 → 10년치 컬렉션 도입으로 전 연도 적재됨)
         """
-        data = real_client.post(
-            "/vector/search", json={"query": "감사의견", "year": 2020}
-        ).json()
-        assert data["count"] == 0
-        assert data["results"] == []
-        assert len(data["warnings"]) > 0
-        assert "audit_reports_2020" in data["warnings"][0]
+        data = real_client.get("/vector/health").json()
+        for year in data["indexed_years"]:
+            assert 2014 <= year <= 2024, f"indexed_years 에 범위 밖 연도 포함: {year}"
 
     def test_multiple_queries_consistent(self, real_client):
         """같은 질의를 두 번 호출하면 동일한 결과를 반환해야 한다."""
