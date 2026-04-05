@@ -176,7 +176,8 @@ def deep_clean_normalize(tbl):
     skip_keywords = ["(%)", "율", "비율", "비중", "(원)", "단위:원"]
 
     for row in tbl.get("rows", []):
-        if not row: continue
+        if not row: 
+            continue
         row_name = str(row[0]).replace(" ", "")
         new_row = [row[0]] 
         
@@ -322,7 +323,8 @@ def clean_tree(node):
             merged_tables = []
             current_unit = ""
             for tbl in node["tables"]:
-                if not tbl: continue
+                if not tbl: 
+                    continue
                 is_unit = "단위" in str(tbl.get("columns", "")) or (
                     len(tbl.get("rows", [])) == 1 and "단위" in str(tbl["rows"])
                 )
