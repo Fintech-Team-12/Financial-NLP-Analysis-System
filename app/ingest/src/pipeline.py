@@ -28,35 +28,30 @@ def extract_company_name_from_html(soup):
         name = match.group(1).replace(" ", "")
         name = re.sub(r'\([주유합명자]+\)', '', name) 
         name = re.sub(r'주식회사|유한책임회사|유한회사|합자회사|합명회사', '', name)
-        if name:
-            return name
+        if name: return name
 
     # 2. "XXX 주식회사" 또는 "주식회사 XXX" 패턴 (공백 허용)
     # 삼성전자 주식회사 등
     match = re.search(rf'([가-힣a-zA-Z0-9\s]+?)\s*{corp_full}', head_text)
     if match:
         name = match.group(1).strip().replace(" ", "")
-        if len(name) >= 2:
-            return name
+        if len(name) >= 2: return name
         
     match = re.search(rf'{corp_full}\s*([가-힣a-zA-Z0-9\s]+?)', head_text)
     if match:
         name = match.group(1).strip().replace(" ", "")
-        if len(name) >= 2:
-            return name
+        if len(name) >= 2: return name
         
     # 3. (주)XXX 또는 XXX(주) 패턴
     match = re.search(rf'([가-힣a-zA-Z0-9\s]+?)\s*\(\s*{corp_short}\s*\)', head_text)
     if match:
         name = match.group(1).strip().replace(" ", "")
-        if len(name) >= 2:
-            return name
+        if len(name) >= 2: return name
         
     match = re.search(rf'\(\s*{corp_short}\s*\)\s*([가-힣a-zA-Z0-9\s]+?)', head_text)
     if match:
         name = match.group(1).strip().replace(" ", "")
-        if len(name) >= 2:
-            return name
+        if len(name) >= 2: return name
 
     # 4. "제 XX 기" 주변에서 찾기 (DART 표준 표지 하단 패턴)
     match = re.search(r'제\s*\d+\s*기\s*.*?([가-힣a-zA-Z0-9]+)\s*(?:주식회사|\(주\))', head_text, re.DOTALL)
