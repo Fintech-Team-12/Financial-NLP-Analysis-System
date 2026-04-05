@@ -346,12 +346,16 @@ def flatten_structured_audit_json(
     if not isinstance(year_block, dict):
         raise ValueError("연도 아래 블록은 dict 구조여야 합니다.")
 
-    company = extract_company_from_data(year_block, default=default_company)
+    # 🟢 [수정] JSON 내부에 저장된 'company' 메타데이터를 우선적으로 읽어옴
+    company = year_block.get("company", default_company)
+    print(f"   -> [Flatten] {year}년도 데이터의 회사명을 '{company}'로 설정합니다.")
 
     records: list[dict[str, Any]] = []
     running_order = [0]
 
     for top_key, top_value in year_block.items():
+        if top_key == "company":
+            continue
         if not isinstance(top_value, dict):
             continue
 
@@ -448,16 +452,31 @@ def process_one_file(input_path: Path, output_dir: Path) -> list[dict[str, Any]]
 
 
 def main():
+    # 1. 현재 파일(structured_flatten.py) 위치: project_root/chroma/data_process/
     base_dir = Path(__file__).resolve().parent
-    project_dir = base_dir.parent
+    
+    # 2. 상위로 이동: project_root/chroma/
+    # 은서님 로직대로 project_dir을 잡으려면 여기서 한 번 더 올라가야 project_root가 됩니다.
+    project_dir = base_dir.parent.parent 
 
+    # 3. 입력 경로: project_root/data/processed/
     input_dir = project_dir / "data" / "processed"
-    output_dir = project_dir / "chroma" / "flattened_data"
+    
+    # 4. 출력 경로: project_root/chroma/data_process/flattened_data/
+    # 이미지에서 flattened_data가 data_process 안에 있으므로 base_dir를 기준으로 잡습니다.
+    output_dir = base_dir / "flattened_data"
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 경로 확인용 프린트 (디버깅용)
+    print(f"--- 경로 확인 ---")
+    print(f"Project Root: {project_dir}")
+    print(f"Input Dir   : {input_dir}")
+    print(f"Output Dir  : {output_dir}")
+    print(f"------------------")
 
     input_files = sorted(input_dir.glob("*_structured.json"))
     if not input_files:
-        raise FileNotFoundError(f"{input_dir} 안에 *_structured.json 파일이 없습니다.")
+        raise FileNotFoundError(f"❌ {input_dir} 안에 *_structured.json 파일이 없습니다. 경로를 확인해주세요.")
 
     for input_file in input_files:
         flattened = process_one_file(input_file, output_dir)

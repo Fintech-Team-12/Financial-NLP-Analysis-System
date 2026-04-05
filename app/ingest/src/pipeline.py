@@ -150,6 +150,75 @@ def html_table_to_dict(table_tag, columns):
         "rows": optimized_rows,
         "annotations": []
     }
+    
+    
+def deep_clean_normalize(tbl):
+    unit_text = str(tbl.get("unit", "")).replace(" ", "")
+    if not any(u in unit_text for u in ["백만원", "천원", "천주"]):
+        return tbl
+
+    # 1. 컬럼명 처리 및 '재할당'
+    cols = tbl.get("columns", [])
+    new_cols = []
+    for col in cols:
+        col_name = str(col).replace(" ", "")
+        if any(kw in col_name for kw in ["주식수", "수량"]) \
+           and "(주)" not in col_name and "주당" not in col_name:
+            new_cols.append(str(col) + "(주)")
+        else:
+            new_cols.append(col)
+    
+    # 💥 핵심: tbl의 컬럼 정보를 업데이트해야 함
+    tbl["columns"] = new_cols
+    cols = new_cols # 아래 데이터 루프에서 바뀐 이름을 참조하도록 업데이트
+    
+    new_rows = []
+    skip_keywords = ["(%)", "율", "비율", "비중", "(원)", "단위:원"]
+
+    for row in tbl.get("rows", []):
+        if not row: 
+            continue
+        row_name = str(row[0]).replace(" ", "")
+        new_row = [row[0]] 
+        
+        is_already_final_unit = any(kw in row_name for kw in skip_keywords)
+        is_share_row = any(kw in row_name for kw in ["주식수", "수량"])
+        
+        # 행 이름에 (주) 부착
+        if is_share_row and "(주)" not in row_name and "주당" not in row_name:
+            new_row[0] = str(row[0]) + "(주)"
+
+        for idx, cell in enumerate(row[1:], start=1):
+            if isinstance(cell, (int, float)) and not is_already_final_unit:
+                # 바뀐 컬럼명에서 주식수 여부 판단
+                col_name = str(cols[idx]).replace(" ", "") if idx < len(cols) else ""
+                is_share_col = any(kw in col_name for kw in ["주식수", "수량"])
+                
+                # A. 주식수 변환 (행 이름이나 컬럼명 중 하나라도 주식수 맥락이면)
+                if "천주" in unit_text and (is_share_row or is_share_col):
+                    new_row.append(int(cell * 1000))
+                
+                # B. 금액 변환
+                elif "백만원" in unit_text and not (is_share_row or is_share_col):
+                    new_row.append(int(cell * 1000000))
+                
+                else:
+                    new_row.append(cell)
+            else:
+                new_row.append(cell)
+        new_rows.append(new_row)
+
+    # 2. 단위 라벨 업데이트
+    updated_unit = unit_text.replace("백만원", "원").replace("천주", "주").replace("천원", "원")
+    if "주" in updated_unit and "원" in updated_unit:
+        tbl["unit"] = "(단위: 주, 원)"
+    elif "주" in updated_unit:
+        tbl["unit"] = "(단위: 주)"
+    else:
+        tbl["unit"] = "(단위: 원)"
+
+    tbl["rows"] = new_rows
+    return tbl
 # ==========================================
 # 주석 전용 헬퍼 함수 - 고정 (잘못 덮어씌워진 부분 복구)
 # ==========================================
@@ -249,42 +318,44 @@ def html_table_to_dict_notes(table_tag):
 
 def clean_tree(node):
     if isinstance(node, dict):
+        # --- [기존 테이블 병합/단위 처리 로직 시작] ---
         if "tables" in node and node["tables"]:
             merged_tables = []
             current_unit = ""
             for tbl in node["tables"]:
-                if not tbl:
+                if not tbl: 
                     continue
                 is_unit = "단위" in str(tbl.get("columns", "")) or (
                     len(tbl.get("rows", [])) == 1 and "단위" in str(tbl["rows"])
                 )
                 if is_unit:
-                    # 👇 이 줄이 빠져서 났던 에러입니다!
                     raw_unit = str(tbl["rows"][0][0]) if tbl.get("rows") else ""
-                    
-                    # 단위 정제 로직
                     clean_u = re.sub(r'^[\-\s]+', '', raw_unit)
                     clean_u = re.sub(r'(주)\s+(백만원|원|천원)', r'\1, \2', clean_u)
                     clean_u = re.sub(r'(백만원|원|천원)\s+(주)', r'\1, \2', clean_u)
-                    
                     current_unit = clean_u
                     continue
                 
-                merged_tables.append(
-                    {
-                        "unit": current_unit,
-                        "columns": tbl.get("columns", []),
-                        "rows": tbl.get("rows", []),
-                        "annotations": tbl.get("annotations", []),
-                    }
-                )
+                # 원본 방식대로 테이블 생성
+                temp_tbl = {
+                    "unit": current_unit,
+                    "columns": tbl.get("columns", []),
+                    "rows": tbl.get("rows", []),
+                    "annotations": tbl.get("annotations", []),
+                }
+                # 💥 여기서만 100만 배 정규화 호출!
+                merged_tables.append(deep_clean_normalize(temp_tbl))
                 current_unit = ""
             node["tables"] = merged_tables
+        # --- [기존 테이블 병합/단위 처리 로직 끝] ---
+
+        # 🟢 원본의 안전한 재귀 구조 유지 (content, title 유실 방지)
         for k, v in list(node.items()):
             if k in ["sub_sections", "tables"] and not v:
                 del node[k]
             else:
                 node[k] = clean_tree(v)
+                
     elif isinstance(node, str):
         return re.sub(r" {2,}", " ", node).strip()
     return node
@@ -737,7 +808,7 @@ def parse_complex_notes(html_content):
 
     lines = [line.strip() for line in pure_text.split("\n") if line.strip()]
     final_data = {}
-    curr_L1 = curr_L2 = curr_L3 = curr_L4 = None
+    curr_L1 = curr_L2 = curr_L3 = curr_L4 = curr_L5 = None
     started = False
     kor_ord = {chr(i): i for i in range(ord("가"), ord("하") + 1)}
     curr_L3_char = ""
@@ -824,8 +895,27 @@ def parse_complex_notes(html_content):
                 }
                 curr_L4 = parent["sub_sections"][key]
                 continue
+        m5 = re.match(r"^(\d+)\)\s+(.*)", check_line)
+        if m5:
+            parent = curr_L4 or curr_L3 or curr_L2 or curr_L1
+            if parent:
+                key = m5.group(1) + ")"
+                orig_key = key
+                counter = 1
+                while key in parent["sub_sections"]:
+                    key = f"{orig_key}_{counter}"
+                    counter += 1
+                parent["sub_sections"][key] = {
+                    "title": m5.group(2).strip(),
+                    "content": "",
+                    "tables": [],
+                    "sub_sections": {},
+                }
+                curr_L5 = parent["sub_sections"][key]
+                continue
 
-        active_node = curr_L4 or curr_L3 or curr_L2 or curr_L1
+
+        active_node = curr_L5 or curr_L4 or curr_L3 or curr_L2 or curr_L1
         if active_node:
             if line in all_captured_footnotes:
                 continue
