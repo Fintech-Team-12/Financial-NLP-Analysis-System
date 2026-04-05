@@ -16,7 +16,7 @@ class Settings:
     # ── 동작 모드 ─────────────────────────────────────────────────────────────
     # True  → MockRetriever + MockGenerator (Chroma/Ollama 불필요)
     # False → ChromaRetriever + OllamaGenerator (담당자 구현 후 교체)
-    mock_mode: bool = os.getenv("MOCK_MODE", "true").lower() == "true"
+    mock_mode: bool = os.getenv("MOCK_MODE", "false").lower() == "true"
 
     # ── ChromaDB — PersistentClient 경로 (현재 사용) ──────────────────────────
     # 팀원 chroma/load_*.py 가 "./chroma_store" 에 적재.
@@ -50,7 +50,7 @@ class Settings:
 
     def get_data_path(self, year: int) -> Path:
         """연도별 processed JSON 파일 경로 반환."""
-        return Path(self.data_dir) / f"audit_report_{year}_structured.json"
+        return Path(self.data_dir) / f"samsung_audit_report_{year}_structured.json"
 
 
 # 모듈 수준 싱글턴 — 테스트에서 settings.data_dir = "..." 으로 직접 덮어쓰기 가능

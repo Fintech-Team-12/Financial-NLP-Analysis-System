@@ -8,10 +8,15 @@ from app.routes import health, ingest, qa, vector
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # startup: 필요 시 특정 연도 자동 인덱싱 추가 가능
-    # 예) from app.services.indexing import ingest_year; ingest_year(2023)
+    # startup: processed JSON → in-memory 인덱스 자동 적재
+    # 파일이 없는 연도는 조용히 스킵 (FileNotFoundError 무시)
+    from app.services.indexing import ingest_year
+    for year in range(2014, 2025):
+        try:
+            ingest_year(year)
+        except FileNotFoundError:
+            pass
     yield
-    # shutdown: 정리 작업 추가 가능
 
 
 app = FastAPI(

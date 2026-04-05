@@ -324,7 +324,7 @@ def test_chroma_retriever_returns_normalized_documents():
                 "year": 2014,
                 "section_title": "감사의견",
                 "content_type": "text",
-                "section_path": "감사보고서 > 감사의견",
+                "section_path": "감사보고서 > 감사의견",  # → doc_type="audit_report"
             },
             "distance": 0.1,
             "collection": "audit_reports_2014",
@@ -341,29 +341,32 @@ def test_chroma_retriever_returns_normalized_documents():
     assert doc.doc_id == "chunk_001"
     assert doc.year == 2014
     assert doc.section == "감사의견"
-    assert doc.doc_type == "text"
+    assert doc.doc_type == "audit_report"   # section_path 첫 세그먼트 "감사보고서" → audit_report
     assert "적정" in doc.content
     assert doc.numeric_value is None
     assert doc.related_notes == []
 
 
 def test_chroma_retriever_doc_type_filter():
-    """ChromaRetriever 가 doc_type 후처리 필터를 적용하는지 확인."""
+    """ChromaRetriever 가 section_path 기반 doc_type 후처리 필터를 적용하는지 확인."""
     from app.services.retrieval import ChromaRetriever
 
     mock_result = {
         "results": [
-            {"id": "c1", "document": "텍스트", "metadata": {"year": 2020, "section_title": "A",
-             "content_type": "text", "section_path": ""}, "distance": 0.1, "collection": "x"},
-            {"id": "c2", "document": "테이블", "metadata": {"year": 2020, "section_title": "B",
-             "content_type": "table", "section_path": ""}, "distance": 0.2, "collection": "x"},
+            # section_path "감사보고서 > ..." → doc_type="audit_report"
+            {"id": "c1", "document": "감사의견 텍스트", "metadata": {"year": 2020, "section_title": "감사의견",
+             "content_type": "text", "section_path": "감사보고서 > 감사의견"}, "distance": 0.1, "collection": "x"},
+            # section_path "주석 > ..." → doc_type="note"
+            {"id": "c2", "document": "주석 내용", "metadata": {"year": 2020, "section_title": "재고자산",
+             "content_type": "text", "section_path": "주석 > 8"}, "distance": 0.2, "collection": "x"},
         ],
         "warnings": [],
     }
 
     with patch("app.services.vector_store.search", return_value=mock_result):
         retriever = ChromaRetriever()
-        docs = retriever.search("쿼리", year=2020, doc_type="table")
+        docs = retriever.search("쿼리", year=2020, doc_type="note")
 
     assert len(docs) == 1
     assert docs[0].doc_id == "c2"
+    assert docs[0].doc_type == "note"

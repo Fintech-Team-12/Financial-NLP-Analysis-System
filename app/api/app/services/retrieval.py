@@ -91,24 +91,45 @@ class MockRetriever(RetrieverBase):
 
 # ── ChromaRetriever ──────────────────────────────────────────────────────────
 
+_SECTION_PATH_TO_DOC_TYPE: dict[str, str] = {
+    "감사보고서": "audit_report",
+    "부록": "audit_report",
+    "주석": "note",
+    "재무상태표": "financial_statement",
+    "손익계산서": "financial_statement",
+    "포괄손익계산서": "financial_statement",
+    "자본변동표": "financial_statement",
+    "현금흐름표": "financial_statement",
+}
+
+
+def _infer_doc_type(section_path: str) -> str:
+    """
+    ChromaDB section_path 의 첫 번째 세그먼트로 doc_type 결정.
+    qa.py 가 사용하는 doc_type 값계(audit_report/note/financial_statement)와 매핑.
+    """
+    top = section_path.split(" > ")[0].strip() if section_path else ""
+    return _SECTION_PATH_TO_DOC_TYPE.get(top, "other")
+
+
 def _chunk_to_normalized(chunk: dict, default_year: int) -> NormalizedDocument:
     """
     vector_store.search() 결과 1건 → NormalizedDocument 변환.
 
+    doc_type: ChromaDB section_path 첫 세그먼트로 결정 (content_type 은 text/table 이라 부적합).
     numeric_value 와 related_notes 는 ChromaDB 에 저장되지 않아 None/[].
-    ChromaRetriever 를 통한 /qa 응답은 금액 직접 추출이 불가능하므로
-    NUMERIC 유형 질문에서는 MockRetriever + in-memory 인덱스가 더 정확하다.
     """
     meta = chunk.get("metadata", {})
+    section_path = meta.get("section_path", "")
     return NormalizedDocument(
         doc_id=chunk["id"],
-        doc_type=meta.get("content_type", "unknown"),
+        doc_type=_infer_doc_type(section_path),
         year=int(meta.get("year", default_year)),
         section=meta.get("section_title", ""),
         content=chunk.get("document", ""),
         numeric_value=None,
         related_notes=[],
-        parent_section=meta.get("section_path", ""),
+        parent_section=section_path,
     )
 
 

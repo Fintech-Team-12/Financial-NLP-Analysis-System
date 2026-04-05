@@ -82,7 +82,7 @@ SAMPLE_DATA = {
 def sample_data_dir(tmp_path_factory: pytest.TempPathFactory) -> str:
     """세션당 1회 생성되는 임시 JSON 파일 디렉토리."""
     data_dir: Path = tmp_path_factory.mktemp("data")
-    file_path = data_dir / "audit_report_2023_structured.json"
+    file_path = data_dir / "samsung_audit_report_2023_structured.json"
     file_path.write_text(json.dumps(SAMPLE_DATA, ensure_ascii=False), encoding="utf-8")
     return str(data_dir)
 
@@ -101,15 +101,27 @@ def reset_store() -> Generator[None, None, None]:
 @pytest.fixture
 def client(sample_data_dir: str, reset_store: None) -> Generator[TestClient, None, None]:
     """
-    DATA_DIR 을 임시 경로로 오버라이드한 TestClient.
-    reset_store 에 의존 → 항상 빈 store 에서 시작.
+    단위 테스트용 TestClient.
+
+    - DATA_DIR 을 임시 샘플 경로로 오버라이드
+    - MOCK_MODE=True 강제: 단위 테스트는 항상 MockRetriever 사용
+      (ChromaRetriever 는 실제 chroma_store 가 필요하므로 통합 테스트에서만 사용)
+    - lifespan 자동 ingest 후 store 를 재초기화: "빈 상태" 가정을 보장
     """
     from app.core.config import settings
+    from app.services import indexing
+
     original_dir = settings.data_dir
+    original_mock = settings.mock_mode
     settings.data_dir = sample_data_dir
+    settings.mock_mode = True  # 단위 테스트는 Chroma 불필요
 
     from app.main import app
     with TestClient(app) as c:
+        # lifespan 자동 ingest 가 실행된 후이므로 store 를 비워 깨끗한 상태로 시작
+        indexing._store.clear()
+        indexing._indexed_years.clear()
         yield c
 
     settings.data_dir = original_dir
+    settings.mock_mode = original_mock
