@@ -237,3 +237,6 @@ def get_retriever() -> RetrieverBase:
     if settings.mock_mode:
         return MockRetriever()
     return ChromaRetriever()
+    print("MOCK_MODE:", settings.mock_mode)
+    print("Using MockRetriever" if settings.mock_mode else "Using ChromaRetriever")
+
