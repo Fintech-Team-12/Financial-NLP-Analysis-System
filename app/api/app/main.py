@@ -42,11 +42,40 @@ async def lifespan(app: FastAPI):
                 # 이미 적재된 연도는 함수 내부에서 자동으로 스킵함
                 res = vector_store.index_year(year)
                 if res.get("indexed", 0) > 0:
-                    print(f"📦 Indexed ChromaDB for year {year}: {res['indexed']} chunks added.")
+                    print(f"📦 Indexed ChromaDB text for year {year}: {res['indexed']} chunks added.")
             except Exception as e:
                 # 인덱싱 실패가 서버 구동을 막지 않도록 로그만 출력
                 if "Enriched data" not in str(e): # 파일 없는 경우는 흔하므로 스킵
-                    print(f"⚠️ Failed to index ChromaDB for year {year}: {e}")
+                    print(f"⚠️ Failed to index ChromaDB text for year {year}: {e}")
+                    
+    # (3) 테이블 데이터 자동 적재
+    if not _cfg.mock_mode:
+        try:
+            import subprocess
+            import sys
+            from pathlib import Path
+            from app.services.vector_store import _COLLECTION_TABLE
+            
+            health_data = vector_store.health_check()
+            stats = health_data.get("collection_stats", {})
+            
+            # 테이블 데이터가 0건이면 자동으로 적재 스크립트 실행
+            if stats.get(_COLLECTION_TABLE, 0) == 0:
+                print("🚀 Auto-indexing Table collection...")
+                project_root = Path(__file__).resolve().parents[3]
+                script_path = project_root / "chroma" / "load_table_to_chroma.py"
+                
+                if script_path.exists():
+                    subprocess.run([sys.executable, str(script_path)], check=True)
+                    print("✅ Auto-indexing Table collection completed.")
+                else:
+                    print(f"⚠️ Table loading script not found at {script_path}")
+            else:
+                table_cnt = stats.get(_COLLECTION_TABLE)
+                print(f"🔄 Table collection already has {table_cnt} chunks. Skipping auto-load.")
+        except Exception as e:
+            print(f"⚠️ Failed to auto-index Table collection: {e}")
+
     yield
 
 

@@ -136,13 +136,15 @@ def test_vector_index_missing_enriched_file(tmp_path, monkeypatch):
     with patch("app.services.vector_store._get_client", return_value=fc):
         resp = client.post("/vector/index", json={"year": 2020})
     assert resp.status_code == 404
-    assert "Enriched data not found" in resp.json()["detail"]
+    # 상세 경로 정보를 포함하는 새로운 에러 메시지 형식을 부분 일치로 검사
+    assert "Enriched data" in resp.json()["detail"]
+    assert "not found" in resp.json()["detail"]
 
 
 def test_vector_index_ok(tmp_path, monkeypatch):
     import app.core.config as cfg
 
-    enriched = tmp_path / "audit_report_2014_enriched.json"
+    enriched = tmp_path / "삼성전자_audit_report_2014_enriched.json"
     enriched.write_text(
         json.dumps([{
             "chunk_id": "c1", "embedding_text": "삼성전자 2014년 감사의견",
@@ -172,7 +174,7 @@ def test_vector_index_ok(tmp_path, monkeypatch):
 def test_vector_index_skipped_when_already_indexed(tmp_path, monkeypatch):
     import app.core.config as cfg
 
-    enriched = tmp_path / "audit_report_2015_enriched.json"
+    enriched = tmp_path / "삼성전자_audit_report_2015_enriched.json"
     enriched.write_text(
         json.dumps([{"chunk_id": "x1", "embedding_text": "내용", "year": 2015}]),
         encoding="utf-8",
@@ -196,7 +198,7 @@ def test_vector_index_skipped_when_already_indexed(tmp_path, monkeypatch):
 def test_vector_index_force_reindex(tmp_path, monkeypatch):
     import app.core.config as cfg
 
-    enriched = tmp_path / "audit_report_2016_enriched.json"
+    enriched = tmp_path / "삼성전자_audit_report_2016_enriched.json"
     enriched.write_text(
         json.dumps([{"chunk_id": "y1", "embedding_text": "재적재 내용", "year": 2016}]),
         encoding="utf-8",

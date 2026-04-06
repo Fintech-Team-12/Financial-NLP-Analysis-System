@@ -5,7 +5,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-
+import sys
 
 # config.py 위치: {project_root}/app/api/app/core/config.py
 # parents[4]    = {project_root}
@@ -22,7 +22,7 @@ print(f"[config] MOCK_MODE={os.getenv('MOCK_MODE', 'not set')}")
 
 # ── 모듈 탐색 경로 정규화 ──────────────────────────────────────────────────
 # 프로젝트 루트를 sys.path 상단에 추가하여 app.ingest 등 상위 패키지 접근 가능하게 함
-import sys
+
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
