@@ -1,9 +1,43 @@
-.DS_Store
-chroma/.DS_Store
-chroma/flattened_data/
+# Environment
+.env
+.venv
+.venv_api
+.venv_ingest
+venv/
+env/
+.agent
 
+# OS / Editor
+.DS_Store
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
 .pytest_cache/
+.ruff_cache
+.coverage
+.coverage.*
+
+# Database
+*.db
+*.sqlite3
+example_finance.db
+
+# Backend / app data
+app/api/app/data
+uploaded_files/
+
+# Chroma / generated data
+chroma/flattened_data/
 chroma_store/
 chroma_db/
+data/processed/
+
+# Frontend
+node_modules/
+dist/
+dist-ssr/
+.vite
+*.local
