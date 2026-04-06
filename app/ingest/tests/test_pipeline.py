@@ -2,7 +2,7 @@ import json
 import pytest
 import pandas as pd
 import numpy as np
-from src.pipeline import (
+from app.ingest.src.pipeline import (
     clean_amount,
     clean_account,
     clean_note,
@@ -157,6 +157,10 @@ def test_full_pipeline_with_real_file(tmp_path):
 
     # 해당 연도 데이터 추출
     year_data = data[year_key]
+
+    # 기업명 및 핵심 섹션 확인
+    assert "company" in year_data, "'company' 필드가 누락되었습니다."
+    assert "삼성전자" in year_data["company"], f"기업명이 올바르지 않습니다: {year_data['company']}"
 
     # 우리가 파이프라인에서 추출하기로 한 '핵심 6대장'이 잘 들어있는지 확인
     assert "감사보고서" in year_data, "'감사보고서' 섹션이 누락되었습니다."

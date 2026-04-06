@@ -15,32 +15,51 @@ from pathlib import Path
 # 회사명 자동 추출 함수
 def extract_company_name_from_html(soup):
     full_text = soup.get_text(separator=' ', strip=True)
-    head_text = full_text[:1000] 
+    # 공백 및 특수 공백 정제
+    full_text = full_text.replace('\xa0', ' ').replace('\u2002', ' ').replace('\u2003', ' ')
+    head_text = full_text[:2000]  # 탐색 범위를 조금 더 확장
 
     corp_full = r'(?:주\s*식|유\s*한|유\s*한\s*책\s*임|합\s*자|합\s*명)\s*회\s*사'
     corp_short = r'(?:주|유|합자|합명)'
     
+    # 1. "회사명 : XXX" 패턴
     match = re.search(r'회\s*사\s*명\s*[:：]\s*([가-힣a-zA-Z0-9\s\(주\)]+?)(?=\s|\[|\()', head_text)
     if match:
         name = match.group(1).replace(" ", "")
         name = re.sub(r'\([주유합명자]+\)', '', name) 
         name = re.sub(r'주식회사|유한책임회사|유한회사|합자회사|합명회사', '', name)
-        if name: 
+        if name:
             return name
 
-    match = re.search(rf'([가-힣a-zA-Z0-9]+)\s*{corp_full}', head_text)
+    # 2. "XXX 주식회사" 또는 "주식회사 XXX" 패턴 (공백 허용)
+    # 삼성전자 주식회사 등
+    match = re.search(rf'([가-힣a-zA-Z0-9\s]+?)\s*{corp_full}', head_text)
     if match:
-        return match.group(1).replace(" ", "")
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2:
+            return name
         
-    match = re.search(rf'{corp_full}\s*([가-힣a-zA-Z0-9]+)', head_text)
+    match = re.search(rf'{corp_full}\s*([가-힣a-zA-Z0-9\s]+?)', head_text)
     if match:
-        return match.group(1).replace(" ", "")
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2:
+            return name
         
-    match = re.search(rf'([가-힣a-zA-Z0-9]+)\s*\(\s*{corp_short}\s*\)', head_text)
+    # 3. (주)XXX 또는 XXX(주) 패턴
+    match = re.search(rf'([가-힣a-zA-Z0-9\s]+?)\s*\(\s*{corp_short}\s*\)', head_text)
     if match:
-        return match.group(1).replace(" ", "")
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2:
+            return name
         
-    match = re.search(rf'\(\s*{corp_short}\s*\)\s*([가-힣a-zA-Z0-9]+)', head_text)
+    match = re.search(rf'\(\s*{corp_short}\s*\)\s*([가-힣a-zA-Z0-9\s]+?)', head_text)
+    if match:
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2:
+            return name
+
+    # 4. "제 XX 기" 주변에서 찾기 (DART 표준 표지 하단 패턴)
+    match = re.search(r'제\s*\d+\s*기\s*.*?([가-힣a-zA-Z0-9]+)\s*(?:주식회사|\(주\))', head_text, re.DOTALL)
     if match:
         return match.group(1).replace(" ", "")
 
@@ -70,12 +89,16 @@ def clean_amount(val):
     val_str = str(val).strip()
     if val_str == "-" or val_str == "":
         return 0
-    val_str = val_str.replace(",", "")
-    if val_str.startswith("(") and val_str.endswith(")"):
-        val_str = "-" + val_str[1:-1]
+    
+    # 🚀 숫자로 바꿀 때만 쓸 임시 변수(temp_str)를 만들어서 쉼표를 지웁니다.
+    temp_str = val_str.replace(",", "")
+    if temp_str.startswith("(") and temp_str.endswith(")"):
+        temp_str = "-" + temp_str[1:-1]
+        
     try:
-        return int(float(val_str))
+        return int(float(temp_str))
     except ValueError:
+        # 숫자로 바꾸기 실패하면 쉼표가 멀쩡히 살아있는 '원본(val_str)'을 반환합니다!
         return val_str
 
 
@@ -121,8 +144,9 @@ def html_table_to_dict(table_tag, columns):
         if text == '-':
             return '0'
         
-        # 💥 내용연수 특수 기호(띄어쓰기, 쉼표, 하이픈) 모두 '~'로 완벽 복구
-        text = re.sub(r'(?<!\d)(\d{1,2})[\s,~-]+(\d{1,2})\s*년', r'\1~\2년', text)
+    # 💥 내용연수 기호 보존 로직 (쉼표는 '각각', 물결표는 '범위'를 의미하므로 구분하여 복구)
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*(,)\s*(\d{1,2})\s*년', r'\1, \3년', text)
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*([~-])\s*(\d{1,2})\s*년', r'\1~\3년', text)
         
         return text
 
@@ -150,6 +174,75 @@ def html_table_to_dict(table_tag, columns):
         "rows": optimized_rows,
         "annotations": []
     }
+    
+    
+def deep_clean_normalize(tbl):
+    unit_text = str(tbl.get("unit", "")).replace(" ", "")
+    if not any(u in unit_text for u in ["백만원", "천원", "천주"]):
+        return tbl
+
+    # 1. 컬럼명 처리 및 '재할당'
+    cols = tbl.get("columns", [])
+    new_cols = []
+    for col in cols:
+        col_name = str(col).replace(" ", "")
+        if any(kw in col_name for kw in ["주식수", "수량"]) \
+           and "(주)" not in col_name and "주당" not in col_name:
+            new_cols.append(str(col) + "(주)")
+        else:
+            new_cols.append(col)
+    
+    # 💥 핵심: tbl의 컬럼 정보를 업데이트해야 함
+    tbl["columns"] = new_cols
+    cols = new_cols # 아래 데이터 루프에서 바뀐 이름을 참조하도록 업데이트
+    
+    new_rows = []
+    skip_keywords = ["(%)", "율", "비율", "비중", "(원)", "단위:원"]
+
+    for row in tbl.get("rows", []):
+        if not row: 
+            continue
+        row_name = str(row[0]).replace(" ", "")
+        new_row = [row[0]] 
+        
+        is_already_final_unit = any(kw in row_name for kw in skip_keywords)
+        is_share_row = any(kw in row_name for kw in ["주식수", "수량"])
+        
+        # 행 이름에 (주) 부착
+        if is_share_row and "(주)" not in row_name and "주당" not in row_name:
+            new_row[0] = str(row[0]) + "(주)"
+
+        for idx, cell in enumerate(row[1:], start=1):
+            if isinstance(cell, (int, float)) and not is_already_final_unit:
+                # 바뀐 컬럼명에서 주식수 여부 판단
+                col_name = str(cols[idx]).replace(" ", "") if idx < len(cols) else ""
+                is_share_col = any(kw in col_name for kw in ["주식수", "수량"])
+                
+                # A. 주식수 변환 (행 이름이나 컬럼명 중 하나라도 주식수 맥락이면)
+                if "천주" in unit_text and (is_share_row or is_share_col):
+                    new_row.append(int(cell * 1000))
+                
+                # B. 금액 변환
+                elif "백만원" in unit_text and not (is_share_row or is_share_col):
+                    new_row.append(int(cell * 1000000))
+                
+                else:
+                    new_row.append(cell)
+            else:
+                new_row.append(cell)
+        new_rows.append(new_row)
+
+    # 2. 단위 라벨 업데이트
+    updated_unit = unit_text.replace("백만원", "원").replace("천주", "주").replace("천원", "원")
+    if "주" in updated_unit and "원" in updated_unit:
+        tbl["unit"] = "(단위: 주, 원)"
+    elif "주" in updated_unit:
+        tbl["unit"] = "(단위: 주)"
+    else:
+        tbl["unit"] = "(단위: 원)"
+
+    tbl["rows"] = new_rows
+    return tbl
 # ==========================================
 # 주석 전용 헬퍼 함수 - 고정 (잘못 덮어씌워진 부분 복구)
 # ==========================================
@@ -197,10 +290,12 @@ def html_table_to_dict_notes(table_tag):
         if text == '-':
             return '0'
         
-        # 💥 내용연수 특수 기호(띄어쓰기, 쉼표, 하이픈) 모두 '~'로 완벽 복구
-        text = re.sub(r'(?<!\d)(\d{1,2})[\s,~-]+(\d{1,2})\s*년', r'\1~\2년', text)
+        # 💥 내용연수 특수기호 완벽 분리 로직 (순서 중요!)
+        # 1. 물결(~)이나 하이픈(-)이 명확히 있으면 '범위'로 인정
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*[~-]\s*(\d{1,2})\s*년', r'\1~\2년', text)
         
-        text = re.sub(r'\(\s*-?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(%?)\s*\)', r'-\1\2', text)
+        # 2. 쉼표(,), 가운뎃점(·), 슬래시(/) 또는 단순 띄어쓰기로 띄워져 있으면 '각각'으로 간주하여 쉼표로 통일
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*[,·/\s]+\s*(\d{1,2})\s*년', r'\1, \2년', text)
         return re.sub(r'(?<!\d)-?\d+(?:,\d{3})*(?:\.\d+)?(?!\d)', lambda m: m.group(0).replace(',', ''), text)
 
     df_cleaned = df.map(clean_cell_notes) if hasattr(df, 'map') else df.applymap(clean_cell_notes)
@@ -249,42 +344,44 @@ def html_table_to_dict_notes(table_tag):
 
 def clean_tree(node):
     if isinstance(node, dict):
+        # --- [기존 테이블 병합/단위 처리 로직 시작] ---
         if "tables" in node and node["tables"]:
             merged_tables = []
             current_unit = ""
             for tbl in node["tables"]:
-                if not tbl:
+                if not tbl: 
                     continue
                 is_unit = "단위" in str(tbl.get("columns", "")) or (
                     len(tbl.get("rows", [])) == 1 and "단위" in str(tbl["rows"])
                 )
                 if is_unit:
-                    # 👇 이 줄이 빠져서 났던 에러입니다!
                     raw_unit = str(tbl["rows"][0][0]) if tbl.get("rows") else ""
-                    
-                    # 단위 정제 로직
                     clean_u = re.sub(r'^[\-\s]+', '', raw_unit)
                     clean_u = re.sub(r'(주)\s+(백만원|원|천원)', r'\1, \2', clean_u)
                     clean_u = re.sub(r'(백만원|원|천원)\s+(주)', r'\1, \2', clean_u)
-                    
                     current_unit = clean_u
                     continue
                 
-                merged_tables.append(
-                    {
-                        "unit": current_unit,
-                        "columns": tbl.get("columns", []),
-                        "rows": tbl.get("rows", []),
-                        "annotations": tbl.get("annotations", []),
-                    }
-                )
+                # 원본 방식대로 테이블 생성
+                temp_tbl = {
+                    "unit": current_unit,
+                    "columns": tbl.get("columns", []),
+                    "rows": tbl.get("rows", []),
+                    "annotations": tbl.get("annotations", []),
+                }
+                # 💥 여기서만 100만 배 정규화 호출!
+                merged_tables.append(deep_clean_normalize(temp_tbl))
                 current_unit = ""
             node["tables"] = merged_tables
+        # --- [기존 테이블 병합/단위 처리 로직 끝] ---
+
+        # 🟢 원본의 안전한 재귀 구조 유지 (content, title 유실 방지)
         for k, v in list(node.items()):
             if k in ["sub_sections", "tables"] and not v:
                 del node[k]
             else:
                 node[k] = clean_tree(v)
+                
     elif isinstance(node, str):
         return re.sub(r" {2,}", " ", node).strip()
     return node
@@ -630,49 +727,37 @@ def parse_appendix(soup):
         if not text_clean:
             continue
 
-        if len(text_clean) < 50 and re.search(
-            r"내부회계관리제도\s*검토보고서|내부회계관리제도\s*감사보고서", text_clean
-        ):
-            if current_section:
-                appendix_data["sub_sections"][current_section] = {
-                    "title": current_section,
-                    "content": "\n".join(content_buffer),
-                    "tables": tables_buffer,
-                    "sub_sections": {},
-                }
-            current_section = "감사인의 내부회계관리제도 보고서"
-            content_buffer, tables_buffer = [], []
-            continue
-        elif (
-            len(text_clean) < 50
-            and re.search(
-                r"내부회계관리제도\s*운영실태\s*평가보고서|내부회계관리제도\s*운영실태보고서",
-                text_clean,
-            )
-            and not re.search(r"검토보고서|감사보고서", text_clean)
-        ):
-            if current_section:
-                appendix_data["sub_sections"][current_section] = {
-                    "title": current_section,
-                    "content": "\n".join(content_buffer),
-                    "tables": tables_buffer,
-                    "sub_sections": {},
-                }
-            current_section = "경영진의 내부회계관리제도 운영실태보고서"
-            content_buffer, tables_buffer = [], []
-            continue
-        elif len(text_clean) < 50 and re.search(r"외부감사\s*실시내용", text_clean):
-            if current_section:
-                appendix_data["sub_sections"][current_section] = {
-                    "title": current_section,
-                    "content": "\n".join(content_buffer),
-                    "tables": tables_buffer,
-                    "sub_sections": {},
-                }
-            current_section = "외부감사 실시내용"
-            content_buffer, tables_buffer = [], []
-            continue
+        matched_section = None
+        # 🚀 [업그레이드 1] 문장 중간에 언급되는 가짜 제목을 무시하고, 맨 앞(30자 이내)에 등장할 때만 진짜 제목으로 판정
+        if re.search(r"^.{0,30}내부회계관리제도\s*(검토|감사)보고서", text_clean):
+            matched_section = "감사인의 내부회계관리제도 보고서"
+        elif re.search(r"^.{0,30}내부회계관리제도\s*운영실태\s*(평가)?보고서", text_clean) and not re.search(r"검토|감사", text_clean[:30]):
+            matched_section = "경영진의 내부회계관리제도 운영실태보고서"
+        elif re.search(r"^.{0,30}외부감사\s*실시내용", text_clean):
+            matched_section = "외부감사 실시내용"
 
+        # 새로운 섹션을 발견하면 기존 데이터를 '누적 저장' (덮어쓰기 증발 원천 차단)
+        if matched_section and matched_section != current_section:
+            if current_section:
+                if current_section not in appendix_data["sub_sections"]:
+                    appendix_data["sub_sections"][current_section] = {
+                        "title": current_section,
+                        "content": "",
+                        "tables": [],
+                        "sub_sections": {},
+                    }
+                if content_buffer:
+                    appendix_data["sub_sections"][current_section]["content"] += "\n" + "\n".join(content_buffer)
+                if tables_buffer:
+                    appendix_data["sub_sections"][current_section]["tables"].extend(tables_buffer)
+            
+            current_section = matched_section
+            content_buffer, tables_buffer = [], []
+            
+            if len(text_clean) < 50:
+                continue
+
+        # 본문 및 표 데이터 수집
         if current_section:
             if tag.name == "table":
                 columns = (
@@ -687,16 +772,29 @@ def parse_appendix(soup):
                 if text_clean not in content_buffer:
                     content_buffer.append(text_clean)
 
+    # 🚀 [업그레이드 2] 마지막으로 켜져 있던 섹션도 안전하게 '누적 저장'
     if current_section:
-        appendix_data["sub_sections"][current_section] = {
-            "title": current_section,
-            "content": "\n".join(content_buffer),
-            "tables": tables_buffer,
-            "sub_sections": {},
-        }
+        if current_section not in appendix_data["sub_sections"]:
+            appendix_data["sub_sections"][current_section] = {
+                "title": current_section,
+                "content": "",
+                "tables": [],
+                "sub_sections": {},
+            }
+        if content_buffer:
+            appendix_data["sub_sections"][current_section]["content"] += "\n" + "\n".join(content_buffer)
+        if tables_buffer:
+            appendix_data["sub_sections"][current_section]["tables"].extend(tables_buffer)
+
+    # 🧹 목차만 읽고 지나간 껍데기 섹션들을 깔끔하게 청소
+    final_sub_sections = {}
+    for k, v in appendix_data["sub_sections"].items():
+        v["content"] = v["content"].strip()
+        if v["content"] or v["tables"]:
+            final_sub_sections[k] = v
+    appendix_data["sub_sections"] = final_sub_sections
 
     return {"부록": appendix_data}
-
 
 def parse_complex_notes(html_content):
     soup = BeautifulSoup(re.sub(r"\r?\n", "", html_content), "html.parser")
@@ -736,7 +834,7 @@ def parse_complex_notes(html_content):
 
     lines = [line.strip() for line in pure_text.split("\n") if line.strip()]
     final_data = {}
-    curr_L1 = curr_L2 = curr_L3 = curr_L4 = None
+    curr_L1 = curr_L2 = curr_L3 = curr_L4 = curr_L5 = None
     started = False
     kor_ord = {chr(i): i for i in range(ord("가"), ord("하") + 1)}
     curr_L3_char = ""
@@ -823,8 +921,27 @@ def parse_complex_notes(html_content):
                 }
                 curr_L4 = parent["sub_sections"][key]
                 continue
+        m5 = re.match(r"^(\d+)\)\s+(.*)", check_line)
+        if m5:
+            parent = curr_L4 or curr_L3 or curr_L2 or curr_L1
+            if parent:
+                key = m5.group(1) + ")"
+                orig_key = key
+                counter = 1
+                while key in parent["sub_sections"]:
+                    key = f"{orig_key}_{counter}"
+                    counter += 1
+                parent["sub_sections"][key] = {
+                    "title": m5.group(2).strip(),
+                    "content": "",
+                    "tables": [],
+                    "sub_sections": {},
+                }
+                curr_L5 = parent["sub_sections"][key]
+                continue
 
-        active_node = curr_L4 or curr_L3 or curr_L2 or curr_L1
+
+        active_node = curr_L5 or curr_L4 or curr_L3 or curr_L2 or curr_L1
         if active_node:
             if line in all_captured_footnotes:
                 continue
@@ -847,7 +964,105 @@ def parse_complex_notes(html_content):
 
 
 # ==========================================
-# 3. 메인 파이프라인 함수
+# 3. 단일 파일 파싱 함수 (API 업로드용)
+# ==========================================
+def parse_single_file(file_path: str, processed_dir: str) -> dict:
+    """
+    단일 HTML 파일을 파싱하여 structured JSON으로 변환 후 저장.
+
+    Args:
+        file_path: HTML 파일 경로
+        processed_dir: JSON 저장 디렉토리
+
+    Returns:
+        dict: {
+            "year": str,
+            "company_name": str,
+            "save_path": str,
+            "year_data": dict (파싱된 전체 데이터)
+        }
+    """
+    os.makedirs(processed_dir, exist_ok=True)
+
+    year_match = re.search(r"20\d{2}", os.path.basename(file_path))
+    year = year_match.group() if year_match else "Unknown"
+
+    try:
+        with open(file_path, "r", encoding="cp949") as f:
+            html_content = f.read()
+    except UnicodeDecodeError:
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+
+    soup = BeautifulSoup(html_content, "lxml")
+    try:
+        tables = pd.read_html(io.StringIO(html_content), encoding="cp949")
+    except ValueError:
+        tables = []
+
+    company_name = extract_company_name_from_html(soup)
+    print(
+        f"[{year}년] {os.path.basename(file_path)} 처리 중... (자동인식 회사명: {company_name})"
+    )
+
+    year_data = {year: {"company": company_name}}
+
+    year_data[year].update(parse_intro(soup, company_name=company_name))
+
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "재무상태표",
+            ["유동자산", "유동부채", "이익잉여금"],
+            exclude_keywords=["자본변동표", "손익계산서"],
+        )
+    )
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "손익계산서",
+            ["매출액", "영업이익", "당기순이익"],
+            exclude_keywords=["총포괄손익", "포괄손익계산서", "자본변동표"],
+        )
+    )
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "포괄손익계산서",
+            ["기타포괄", "총포괄"],
+            exclude_keywords=["매출액", "자본금", "자본변동표"],
+        )
+    )
+    year_data[year].update(extract_equity_statement(tables, "자본변동표"))
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "현금흐름표",
+            ["영업활동현금흐름", "투자활동현금흐름"],
+            exclude_keywords=[],
+        )
+    )
+    year_data[year].update(parse_appendix(soup))
+    year_data[year].update(parse_complex_notes(html_content))
+
+    save_path = os.path.join(
+        processed_dir, f"{company_name}_audit_report_{year}_structured.json"
+    )
+    with open(save_path, "w", encoding="utf-8") as f:
+        json.dump(year_data, f, ensure_ascii=False, indent=4)
+
+    print(f"  -> 완료! {save_path} 생성됨.")
+
+    return {
+        "year": year,
+        "company_name": company_name,
+        "save_path": save_path,
+        "year_data": year_data,
+    }
+
+
+# ==========================================
+# 3-1. 배치 파이프라인 함수 (기존 호환)
 # ==========================================
 def run_pipeline(raw_dir: str, processed_dir: str):
     file_list = glob.glob(os.path.join(raw_dir, "*.htm*"))
@@ -862,78 +1077,7 @@ def run_pipeline(raw_dir: str, processed_dir: str):
     )
 
     for file_path in file_list:
-        year_match = re.search(r"20\d{2}", os.path.basename(file_path))
-        year = year_match.group() if year_match else "Unknown"
-
-        try:
-            with open(file_path, "r", encoding="cp949") as f:
-                html_content = f.read()
-        except UnicodeDecodeError:
-            with open(file_path, "r", encoding="utf-8") as f:
-                html_content = f.read()
-
-        soup = BeautifulSoup(html_content, "lxml")
-        try:
-            tables = pd.read_html(io.StringIO(html_content), encoding="cp949")
-        except ValueError:
-            tables = []
-
-        # [추가] 회사명 자동 추출
-        company_name = extract_company_name_from_html(soup)
-        print(
-            f"[{year}년] {os.path.basename(file_path)} 처리 중... (자동인식 회사명: {company_name})"
-        )
-
-        # [수정] JSON 스키마에 회사명 메타데이터 추가
-        year_data = {year: {"company": company_name}}
-
-        # [수정] 추출한 회사명을 parse_intro에 전달
-        year_data[year].update(parse_intro(soup, company_name=company_name))
-
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "재무상태표",
-                ["유동자산", "유동부채", "이익잉여금"],
-                exclude_keywords=["자본변동표", "손익계산서"],
-            )
-        )
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "손익계산서",
-                ["매출액", "영업이익", "당기순이익"],
-                exclude_keywords=["총포괄손익", "포괄손익계산서", "자본변동표"],
-            )
-        )
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "포괄손익계산서",
-                ["기타포괄", "총포괄"],
-                exclude_keywords=["매출액", "자본금", "자본변동표"],
-            )
-        )
-        year_data[year].update(extract_equity_statement(tables, "자본변동표"))
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "현금흐름표",
-                ["영업활동현금흐름", "투자활동현금흐름"],
-                exclude_keywords=[],
-            )
-        )
-        year_data[year].update(parse_appendix(soup))
-        year_data[year].update(parse_complex_notes(html_content))
-
-        # [수정] 저장 파일명에 회사명을 동적으로 반영 (삼성전자 하드코딩 제거)
-        save_path = os.path.join(
-            processed_dir, f"{company_name}_audit_report_{year}_structured.json"
-        )
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(year_data, f, ensure_ascii=False, indent=4)
-
-        print(f"  -> 완료! {save_path} 생성됨.")
+        parse_single_file(file_path, processed_dir)
 
     print("-" * 50 + "\n🎉 전체 파이프라인 처리가 완료되었습니다!")
 
@@ -957,3 +1101,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
