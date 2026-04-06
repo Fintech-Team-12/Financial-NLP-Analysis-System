@@ -24,8 +24,8 @@ def run_rag(
     *,
     provider: str | None = None,
     model: str | None = None,
+    chat_history: list[dict] | None = None,
 ) -> dict[str, Any]:
-def run_rag(question: str, chat_history: list[dict] | None = None) -> dict[str, Any]:
     """
     질문을 받아
     1) retrieval/search pipeline 수행
@@ -38,8 +38,7 @@ def run_rag(question: str, chat_history: list[dict] | None = None) -> dict[str, 
     search_output = run_search(question)
     results = search_output.get("results", [])
 
-    llm_output = generate_answer(question, results, provider=provider, model=model)
-    llm_output = generate_answer(question, results, chat_history=chat_history)
+    llm_output = generate_answer(question, results, provider=provider, model=model, chat_history=chat_history)
 
     return {
         "question": question,

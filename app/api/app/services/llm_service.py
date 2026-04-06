@@ -192,6 +192,7 @@ def generate_answer(
     *,
     provider: str | None = None,
     model: str | None = None,
+    chat_history: list[dict] | None = None,
 ) -> dict[str, Any]:
     """
     retrieval 결과 → 최종 답변 생성.
@@ -253,9 +254,9 @@ def generate_answer(
             }
         except Exception as exc:
             _log.warning("Claude 호출 실패 (%s), mock으로 폴백", exc)
-    response = generate_mock_answer(question, results, chat_history=chat_history)
-    response["prompt_preview"] = truncate_text(prompt, 1000)
-    return response
+            response = generate_mock_answer(question, results, chat_history=chat_history)
+            response["prompt_preview"] = truncate_text(prompt, 1000)
+            return response
 
     # ── 5. 키 없음 → mock 폴백 ────────────────────────────────────────────
     _log.warning("사용 가능한 LLM 없음 (provider=%s), mock 응답 사용", provider)
