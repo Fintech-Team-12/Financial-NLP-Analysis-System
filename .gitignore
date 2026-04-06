@@ -34,6 +34,9 @@ chroma/flattened_data/
 chroma_store/
 chroma_db/
 data/processed/
+chroma/data_process/enriched_data/
+chroma/data_process/flattened_data/
+chroma/data_process/sqlite_by_year/
 
 # Frontend
 node_modules/
