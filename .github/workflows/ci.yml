@@ -22,6 +22,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: app/frontend/package.json
+
       - name: Cache pip
         uses: actions/cache@v4
         with:
@@ -37,23 +44,29 @@ jobs:
           pip install -r app/ingest/requirements.txt
           pip install ruff pytest-cov
 
+      - name: Frontend build check
+        run: |
+          cd app/frontend
+          npm install
+          npm run build
+
       - name: Ruff API
         run: ruff check app/api/app app/api/tests
         
       - name: Ruff Ingest
         run: ruff check app/ingest/src app/ingest/tests
 
-
       - name: Pytest API
         run: pytest app/api/tests --cov=app/api/app --cov-report=term-missing
         env:
           PYTHONPATH: app/api
+          MOCK_MODE: "true"
 
       - name: Pytest Ingest
         run: |
           pytest app/ingest/tests --cov=app/ingest/src --cov-report=term-missing
         env:
-          PYTHONPATH: app/ingest
+          PYTHONPATH: .
 
   docker-build:
     runs-on: ubuntu-latest

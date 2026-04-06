@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 from bs4 import BeautifulSoup
 
-from src.pipeline import (
+from app.ingest.src.pipeline import (
     clean_amount,
     clean_account,
     clean_note,
@@ -376,6 +376,10 @@ def test_full_pipeline_with_real_file(tmp_path):
     year_key = list(data.keys())[0]
     year_data = data[year_key]
 
+    # 기업명 검증 추가
+    assert "company" in year_data, "'company' 필드가 누락되었습니다."
+    assert "삼성전자" in year_data["company"], f"기업명이 올바르지 않습니다: {year_data['company']}"
+
     assert "감사보고서" in year_data, "'감사보고서' 섹션이 누락되었습니다."
     assert "재무상태표" in year_data, "'재무상태표' 섹션이 누락되었습니다."
     assert "손익계산서" in year_data, "'손익계산서' 섹션이 누락되었습니다."
@@ -468,6 +472,8 @@ def test_run_pipeline_unknown_year_filename(tmp_path):
 
     output_files = list(processed_dir.glob("*.json"))
     assert len(output_files) == 1
+    # UnknownCompany_audit_report_Unknown_structured.json
+    assert "UnknownCompany" in output_files[0].name
     assert "Unknown" in output_files[0].name
 
 
