@@ -5,6 +5,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRouter
 
+import sys
+from pathlib import Path
+_project_root = Path(__file__).resolve().parents[3]
+if str(_project_root) not in sys.path:
+    sys.path.append(str(_project_root))
+
 from pydantic import BaseModel
 from chroma.search_pipeline import build_search_plan
 
