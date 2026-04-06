@@ -57,8 +57,22 @@ def _get_embedding_function() -> embedding_functions.SentenceTransformerEmbeddin
     )
 
 
-def _get_client() -> chromadb.PersistentClient:
-    """매 호출마다 새 클라이언트 생성. PersistentClient 는 SQLite 열기라 빠름."""
+def _get_client() -> chromadb.ClientAPI:
+    """
+    환경에 따라 ChromaDB 클라이언트 선택.
+
+    로컬 개발 (CHROMA_HOST=localhost 또는 미설정):
+      PersistentClient — chroma_store/ 디렉토리를 직접 읽음.
+
+    Docker / 원격 (CHROMA_HOST=chroma 등 localhost 이외):
+      HttpClient — docker-compose 의 chroma 컨테이너에 HTTP 접속.
+      docker-compose 환경변수: CHROMA_HOST=chroma, CHROMA_PORT=8000
+    """
+    if settings.chroma_host and settings.chroma_host != "localhost":
+        return chromadb.HttpClient(
+            host=settings.chroma_host,
+            port=settings.chroma_port,
+        )
     return chromadb.PersistentClient(path=settings.chroma_persist_path)
 
 

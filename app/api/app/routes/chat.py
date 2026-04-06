@@ -14,6 +14,12 @@ from app.db.models import User
 router = APIRouter()
 
 
+@router.post("/ask", response_model=QAResponse, include_in_schema=False)
+def ask_legacy(req: QARequest) -> QAResponse:
+    """프론트엔드 하위호환 alias — /qa 와 동일."""
+    return ask(req)
+
+
 @router.post("/chat", response_model=ChatResponse)
 def ask(
     req: ChatRequest,
@@ -37,9 +43,11 @@ def ask(
         raise HTTPException(status_code=403, detail="해당 채팅방에 접근 권한이 없습니다.")
 
     chat_history_service.add_message(db, chat_id, "user", req.question)
-
-    # 인덱싱된 문서가 없으면 안내 메시지 반환 (503 에러 대신)
-    if not indexing.get_document_count():
+    # MockRetriever(mock_mode=True) 는 in-memory 인덱스에 의존하므로 비었으면 차단.
+    # ChromaRetriever(mock_mode=False) 는 ChromaDB 가 자체적으로 동작하므로
+    # in-memory 가 비어 있어도 차단하지 않는다 (parsing 브랜치 파일명 변경 대응).
+    from app.core.config import settings as _cfg
+    if _cfg.mock_mode and not indexing.get_document_count():
         fallback_answer = (
             "현재 인덱싱된 감사보고서 문서가 없습니다. "
             "data/processed/ 경로에 JSON 데이터를 추가하거나 "
@@ -102,8 +110,14 @@ def _handle_note_linked(item, year, question, top_k, retriever):
 
 
 def _handle_descriptive(question, year, top_k, retriever):
-    """감사보고서 + 주석 텍스트 혼합 검색."""
-    half = max(top_k // 2, 1)
-    audit = retriever.search(question, year=year, doc_type="audit_report", top_k=half + 1)
-    notes = retriever.search(question, year=year, doc_type="note", top_k=half)
-    return (audit + notes)[:top_k]
+    """감사보고서 텍스트 검색.
+
+    임베딩 기반 검색에서 질문 문장 전체보다 핵심 키워드가
+    더 정확한 유사도를 산출한다.
+    연도 접두사("2023년 ")와 문말 어미/물음표를 제거한 뒤 검색한다.
+    """
+    import re
+    # "2023년 감사의견은?" → "감사의견"
+    query = re.sub(r"20\d{2}년\s*", "", question).strip()
+    query = re.sub(r"[은는이가을를]?\s*\??$", "", query).strip() or question
+    return retriever.search(query, year=year, top_k=top_k)
