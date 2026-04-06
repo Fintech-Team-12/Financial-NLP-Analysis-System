@@ -1,36 +1,46 @@
-
+# Environment
 .env
+.venv
+.venv_api
+.venv_ingest
+venv/
+env/
+.agent
+
+# OS / Editor
 .DS_Store
-__pycache__
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.ruff_cache
+.coverage
+.coverage.*
+
+# Database
 *.db
 *.sqlite3
-*.pyc
-.pytest_cache/
+example_finance.db
 
-# Node / Vite (Frontend)
+# Backend / app data
+app/api/app/data
+uploaded_files/
+
+# Chroma / generated data
+chroma/flattened_data/
+chroma_store/
+chroma_db/
+data/processed/
+
+# Frontend
 node_modules/
 dist/
 dist-ssr/
 .vite
 *.local
-
-# Python / FastAPI (Backend)
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-venv/
-env/
-app/api/app/data
-
-# Database & User Uploads
-
-example_finance.db
-uploaded_files/
-chroma/flattened_data/
-chroma_store/
-chroma_db/
-
 data/processed/
 
 
