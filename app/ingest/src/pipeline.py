@@ -199,7 +199,8 @@ def deep_clean_normalize(tbl):
     skip_keywords = ["(%)", "율", "비율", "비중", "(원)", "단위:원"]
 
     for row in tbl.get("rows", []):
-        if not row: continue
+        if not row: 
+            continue
         row_name = str(row[0]).replace(" ", "")
         new_row = [row[0]] 
         
