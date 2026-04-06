@@ -181,7 +181,7 @@ def deep_clean_normalize(tbl):
     if not any(u in unit_text for u in ["백만원", "천원", "천주"]):
         return tbl
 
-    # 1. 컬럼명 처리 및 '재할당'
+    # 1. 컬럼명 처리
     cols = tbl.get("columns", [])
     new_cols = []
     for col in cols:
@@ -192,9 +192,8 @@ def deep_clean_normalize(tbl):
         else:
             new_cols.append(col)
     
-    # 💥 핵심: tbl의 컬럼 정보를 업데이트해야 함
     tbl["columns"] = new_cols
-    cols = new_cols # 아래 데이터 루프에서 바뀐 이름을 참조하도록 업데이트
+    cols = new_cols
     
     new_rows = []
     skip_keywords = ["(%)", "율", "비율", "비중", "(원)", "단위:원"]
@@ -208,31 +207,38 @@ def deep_clean_normalize(tbl):
         is_already_final_unit = any(kw in row_name for kw in skip_keywords)
         is_share_row = any(kw in row_name for kw in ["주식수", "수량"])
         
-        # 행 이름에 (주) 부착
         if is_share_row and "(주)" not in row_name and "주당" not in row_name:
             new_row[0] = str(row[0]) + "(주)"
 
         for idx, cell in enumerate(row[1:], start=1):
-            if isinstance(cell, (int, float)) and not is_already_final_unit:
-                # 바뀐 컬럼명에서 주식수 여부 판단
+            if isinstance(cell, (int, float)):
                 col_name = str(cols[idx]).replace(" ", "") if idx < len(cols) else ""
-                is_share_col = any(kw in col_name for kw in ["주식수", "수량"])
                 
-                # A. 주식수 변환 (행 이름이나 컬럼명 중 하나라도 주식수 맥락이면)
-                if "천주" in unit_text and (is_share_row or is_share_col):
-                    new_row.append(int(cell * 1000))
+                # 핵심: 행이나 컬럼에 skip 키워드가 있으면 변환 건너뜀
+                is_skip_target = is_already_final_unit or any(kw in col_name for kw in skip_keywords)
                 
-                # B. 금액 변환
-                elif "백만원" in unit_text and not (is_share_row or is_share_col):
-                    new_row.append(int(cell * 1000000))
-                
+                if not is_skip_target:
+                    is_share_col = any(kw in col_name for kw in ["주식수", "수량"])
+                    
+                    if "천주" in unit_text and (is_share_row or is_share_col):
+                        new_row.append(int(cell * 1000))
+                    elif "백만원" in unit_text and not (is_share_row or is_share_col):
+                        new_row.append(int(cell * 1000000))
+                    elif "천원" in unit_text and not (is_share_row or is_share_col): # 천원 케이스 추가
+                        new_row.append(int(cell * 1000))
+                    else:
+                        new_row.append(cell)
                 else:
+                    # % 등이 포함된 경우 원본 유지
                     new_row.append(cell)
             else:
+                # 숫자가 아닌 경우 원본 유지
                 new_row.append(cell)
+        
+        # 중복 append 제거됨
         new_rows.append(new_row)
 
-    # 2. 단위 라벨 업데이트
+    # 2. 단위 라벨 업데이트 (기존 로직 유지)
     updated_unit = unit_text.replace("백만원", "원").replace("천주", "주").replace("천원", "원")
     if "주" in updated_unit and "원" in updated_unit:
         tbl["unit"] = "(단위: 주, 원)"
@@ -247,7 +253,8 @@ def deep_clean_normalize(tbl):
 # 주석 전용 헬퍼 함수 - 고정 (잘못 덮어씌워진 부분 복구)
 # ==========================================
 def html_table_to_dict_notes(table_tag):
-    marker_pattern = r'(\(\s*\*+\s*\d+\s*\)|\(\s*\*+.*?\).?|\*+\s*\d+|\(주\s*\d*\)|주\s*\d+\s*[)\.]?|주\s*:)'
+   # '주:' 마커 패턴을 제거한 버전
+    marker_pattern = r'(\(\s*\*+\s*\d+\s*\)|\(\s*\*+.*?\).?|\*+\s*\d+|\(주\s*\d*\)|주\s*\d+\s*[)\.]?)'
     annotations = []
     captured_texts = []
 
