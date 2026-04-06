@@ -81,7 +81,7 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
 
       const response = await axios.post(`${API_BASE_URL}/chat`, payload, {
         headers: { Authorization: `Bearer ${token}` },
-        timeout: 60000
+        timeout: 150000
       });
 
       // 새 채팅이든 기존 채팅이든 메시지를 항상 화면에 표시
