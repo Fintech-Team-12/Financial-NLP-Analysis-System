@@ -119,6 +119,20 @@ npm run dev   # http://localhost:5173
     ```
 
 
+## 프로젝트 실행
+
+ ```bash
+터미널 1
+
+cd app/api
+uvicorn app.main:app --reload --port 8000
+
+터미널 2
+
+cd app/frontend
+npm run dev
+```
+
 ---
 
 ## RAG 파이프라인
@@ -375,5 +389,3 @@ pytest-cov==6.2.1
 anyio[trio]==4.9.0
 ruff==0.12.7
 ```
-
-Node.js 의존성은 `app/frontend/package-lock.json` 기준으로 `npm ci`로 재현한다.
