@@ -1,0 +1,6 @@
+﻿query,expected_keyword,clean_query,intent,preferred_content_type,section_title_hint,top_section_hint,top1_hit,top3_hit,top1_id,top1_section_title,top1_collection_type,top1_retrieval_source,top1_pipeline_score
+2014년 현금및현금성자산 알려줘,현금및현금성자산,현금및현금성자산,text_explanation,text,현금및현금성자산,,True,True,2014_주석_2_2.5_text_5569a05d,현금및현금성자산,text,general,1.6407545089721678
+유형자산 표 보여줘,유형자산,유형자산,table_lookup,table,유형자산,,True,True,2014_주석_2_2.11_table_1_44b3d8f0,유형자산,table,section_title_hint,2.186732304096222
+재무제표에 대한 경영진의 책임이 뭐야?,재무제표에 대한 경영진의 책임,재무제표 경영진 책임이,text_explanation,text,재무제표에 대한 경영진의 책임,,True,True,2014_감사보고서_재무제표에 대한 경영진의 책임_text_2379c993,재무제표에 대한 경영진의 책임,text,section_title_hint,2.1625214576721192
+법인세비용 수치 알려줘,법인세비용,법인세비용,table_lookup,table,법인세비용,,True,True,2020_주석_25_나._table_1_07e72444,회사의 법인세비용차감전순이익에 대한 법인세비용과 적용세율을 사용하여 이론적으로 계산된 금액과의 차이는 다음과 같습니다.,table,general,1.0415632009506224
+포괄손익계산서 관련 내용 설명해줘,포괄손익계산서,포괄손익계산서,text_explanation,text,포괄손익계산서,포괄손익계산서,True,True,2014_포괄손익계산서_text_6308b478,포괄손익계산서,text,section_title_hint,3.7287467598915103

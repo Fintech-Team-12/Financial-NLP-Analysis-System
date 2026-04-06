@@ -5,7 +5,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRouter
 
-from app.routes import health, ingest, auth, chats, upload
+from pydantic import BaseModel
+from chroma.search_pipeline import build_search_plan
+
+from app.routes import health, ingest, auth, chats, upload, files as files_router
 from app.routes import chat as chat_qa  # qa.py → chat.py 로 리네임
 
 
@@ -124,4 +127,5 @@ api_router.include_router(chat_qa.router, tags=["chat"])
 api_router.include_router(auth.router, tags=["auth"])
 api_router.include_router(chats.router, tags=["chats"])
 api_router.include_router(upload.router, tags=["upload"])
+api_router.include_router(files_router.router, tags=["files"])
 app.include_router(api_router)

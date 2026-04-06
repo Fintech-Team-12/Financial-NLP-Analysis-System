@@ -81,6 +81,86 @@ def ingest_year(year: int, force: bool = False) -> int:
     return total_count
 
 
+def load_table_chunks_from_file(file_path: Path) -> list[dict]:
+    """
+    structured JSON → flatten → enrich → content_type="table" 레코드만 반환.
+    _store 에 쓰지 않는다. background ChromaDB 테이블 색인 전용.
+
+    chroma.data_process 의 기존 파이프라인 함수를 재사용하므로
+    팀원 load_table_to_chroma.py 와 동일한 메타데이터 스키마를 생성한다.
+
+    config.py 가 이미 project root 를 sys.path 에 추가했으므로
+    chroma.data_process 를 직접 import 할 수 있다.
+    """
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    from chroma.data_process.structured_flatten import flatten_structured_audit_json
+    from chroma.data_process.enrich_flattened_for_rag import enrich_records
+
+    with open(file_path, encoding="utf-8") as f:
+        raw: dict = json.load(f)
+
+    flattened = flatten_structured_audit_json(
+        raw,
+        source_file=file_path.name,
+        report_type="감사보고서",
+        default_company="삼성전자",
+    )
+    enriched = enrich_records(flattened)
+    return [r for r in enriched if r.get("content_type") == "table"]
+
+
+def load_documents_from_file(file_path: Path) -> list[NormalizedDocument]:
+    """
+    JSON 파일을 파싱하여 NormalizedDocument 리스트로 반환.
+    _store 에는 쓰지 않는다.
+
+    background/chroma_indexer.py 전용 경로.
+    디스크의 structured JSON 을 직접 읽으므로 서버 재시작 후에도 안전하다.
+    """
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    with open(file_path, encoding="utf-8") as f:
+        raw: dict = json.load(f)
+
+    years_in_file = [k for k in raw.keys() if k.isdigit()]
+    if not years_in_file:
+        return []
+
+    year_str = years_in_file[0]
+    year = int(year_str)
+    content_data = raw[year_str]
+    company = content_data.get("company", "UnknownCompany")
+
+    docs: list[NormalizedDocument] = []
+    for section_name, section_data in content_data.items():
+        if not isinstance(section_data, dict):
+            continue
+
+        if section_name == "감사보고서":
+            docs.extend(_parse_audit_report(year, company, section_data))
+        elif _is_notes_section(section_name):
+            docs.extend(_parse_notes(year, company, section_data))
+        elif _is_financial_statement(section_name):
+            docs.extend(_parse_financial_statement(year, company, section_name, section_data))
+        elif section_name != "company":
+            content = section_data.get("content", "")
+            if content:
+                doc_id = f"{company}_{section_name}_{year}"
+                docs.append(NormalizedDocument(
+                    doc_id=doc_id,
+                    doc_type="other",
+                    year=year,
+                    company=company,
+                    section=section_name,
+                    content=f"[{company} {year}년 {section_name}]\n{content}",
+                ))
+
+    return docs
+
+
 def ingest_single_file(file_path: Path, force: bool = False) -> int:
     """
     특정 JSON 파일을 읽어 인덱싱합니다.
@@ -90,58 +170,25 @@ def ingest_single_file(file_path: Path, force: bool = False) -> int:
     if file_name in _indexed_files and not force:
         return 0
 
-    if not file_path.exists():
-        raise FileNotFoundError(f"File not found: {file_path}")
-
-    with open(file_path, encoding="utf-8") as f:
-        raw: dict = json.load(f)
-
-    # 파이프라인에서 생성한 JSON은 { "2024": { "company": "...", "감사보고서": ... } } 구조임
-    # 최상위 키(연도) 추출
-    years_in_file = [k for k in raw.keys() if k.isdigit()]
-    if not years_in_file:
+    docs = load_documents_from_file(file_path)
+    if not docs:
         return 0
-    
-    year_str = years_in_file[0]
-    year = int(year_str)
-    content_data = raw[year_str]
-    company = content_data.get("company", "UnknownCompany")
 
-    # force 시 해당 파일 관련 문서 먼저 제거 (ID에 company가 포함되어 있으므로 안전함)
+    year = docs[0].year
+    company = docs[0].company
+
+    # force 시 해당 파일 관련 문서 먼저 제거
     if force:
         prefix = f"{company}_"
         for key in [k for k, v in _store.items() if k.startswith(prefix) and v.year == year]:
             del _store[key]
         _indexed_files.discard(file_name)
 
-    count = 0
-    for section_name, section_data in content_data.items():
-        if not isinstance(section_data, dict):
-            continue
-
-        if section_name == "감사보고서":
-            count += _index_audit_report(year, company, section_data)
-        elif _is_notes_section(section_name):
-            count += _index_notes(year, company, section_data)
-        elif _is_financial_statement(section_name):
-            count += _index_financial_statement(year, company, section_name, section_data)
-        elif section_name != "company":
-            # 기타 섹션
-            content = section_data.get("content", "")
-            if content:
-                doc_id = f"{company}_{section_name}_{year}"
-                _store[doc_id] = NormalizedDocument(
-                    doc_id=doc_id,
-                    doc_type="other",
-                    year=year,
-                    company=company,
-                    section=section_name,
-                    content=f"[{company} {year}년 {section_name}]\n{content}",
-                )
-                count += 1
+    for doc in docs:
+        _store[doc.doc_id] = doc
 
     _indexed_files.add(file_name)
-    return count
+    return len(docs)
 
 
 # ── 섹션 유형 판별 ────────────────────────────────────────────────────────────
@@ -155,13 +202,11 @@ def _is_notes_section(name: str) -> bool:
     return "주석" in name
 
 
-# ── 감사보고서 색인 ───────────────────────────────────────────────────────────
+# ── 파싱 헬퍼 (store 에 쓰지 않고 list 반환) ─────────────────────────────────
 
-def _index_audit_report(year: int, company: str, section_data: dict) -> int:
-    """
-    감사보고서 sub_sections (감사의견, 핵심감사사항 등) 를 각각 문서로 변환.
-    """
-    count = 0
+def _parse_audit_report(year: int, company: str, section_data: dict) -> list[NormalizedDocument]:
+    """감사보고서 sub_sections 를 NormalizedDocument 리스트로 변환."""
+    docs: list[NormalizedDocument] = []
     for sub_name, sub_data in section_data.get("sub_sections", {}).items():
         if not isinstance(sub_data, dict):
             continue
@@ -169,33 +214,29 @@ def _index_audit_report(year: int, company: str, section_data: dict) -> int:
         if not content:
             continue
         doc_id = f"{company}_감사보고서_{year}_{sub_name}"
-        _store[doc_id] = NormalizedDocument(
+        docs.append(NormalizedDocument(
             doc_id=doc_id,
             doc_type="audit_report",
             year=year,
             company=company,
             section=sub_name,
             content=f"[{company} {year}년 {sub_name}]\n{content}",
-        )
-        count += 1
-    return count
+        ))
+    return docs
 
 
-# ── 재무제표 색인 ─────────────────────────────────────────────────────────────
-
-def _index_financial_statement(year: int, company: str, section_name: str, section_data: dict) -> int:
+def _parse_financial_statement(year: int, company: str, section_name: str, section_data: dict) -> list[NormalizedDocument]:
     """
-    재무제표 테이블의 각 row 를 문서로 변환.
+    재무제표 테이블의 각 row 를 NormalizedDocument 로 변환.
     실제 데이터 구조: columns = ["과목명","관련주석","당기금액","전기금액"]
                       rows    = [["매출채권", ["4","5"], 27363016000000, 20503223000000], ...]
     """
-    count = 0
+    docs: list[NormalizedDocument] = []
     for table in section_data.get("tables", []):
         columns: list = table.get("columns", [])
         rows: list = table.get("rows", [])
         unit: str = table.get("unit", "")
 
-        # 컬럼 인덱스 계산
         name_idx = _col_idx(columns, "과목명", fallback=0)
         note_idx = _col_idx(columns, "관련주석")
         amount_cols = {
@@ -212,7 +253,6 @@ def _index_financial_statement(year: int, company: str, section_name: str, secti
             if not item_name:
                 continue
 
-            # 관련주석 추출
             related_notes: list[str] = []
             if note_idx is not None and note_idx < len(row):
                 raw_notes = row[note_idx]
@@ -221,16 +261,14 @@ def _index_financial_statement(year: int, company: str, section_name: str, secti
                 elif isinstance(raw_notes, (str, int)) and raw_notes:
                     related_notes = [str(raw_notes)]
 
-            # 금액 추출
             numeric_value: dict[str, int] = {}
-            for col_name, col_idx in amount_cols.items():
-                if col_idx < len(row) and row[col_idx] is not None:
+            for col_name, col_idx_val in amount_cols.items():
+                if col_idx_val < len(row) and row[col_idx_val] is not None:
                     try:
-                        numeric_value[col_name] = int(row[col_idx])
+                        numeric_value[col_name] = int(row[col_idx_val])
                     except (TypeError, ValueError):
                         pass
 
-            # 검색용 content 생성
             parts = [f"[{company} {year}년 {section_name}] {item_name}"]
             if unit:
                 parts.append(f"단위: {unit}")
@@ -240,7 +278,7 @@ def _index_financial_statement(year: int, company: str, section_name: str, secti
                 parts.append(f"관련주석: {', '.join(related_notes)}")
 
             doc_id = f"{company}_{section_name}_{year}_{item_name}"
-            _store[doc_id] = NormalizedDocument(
+            docs.append(NormalizedDocument(
                 doc_id=doc_id,
                 doc_type="financial_statement",
                 year=year,
@@ -249,33 +287,20 @@ def _index_financial_statement(year: int, company: str, section_name: str, secti
                 content="\n".join(parts),
                 numeric_value=numeric_value or None,
                 related_notes=related_notes,
-            )
-            count += 1
+            ))
 
-    return count
-
-
-# ── 주석 색인 ─────────────────────────────────────────────────────────────────
-
-def _index_notes(year: int, company: str, section_data: dict) -> int:
-    """주석 섹션을 재귀적으로 순회하며 문서로 변환.
-
-    두 가지 JSON 포맷을 모두 지원:
-      구 포맷 (테스트 픽스처): {"sub_sections": {"5": {...}, "8": {...}}}
-      신 포맷 (parsing 브랜치): {"1": {...}, "30": {...}}  — sub_sections 키 없음
-    """
-    # subs = section_data.get("sub_sections")
-    # if subs and isinstance(subs, dict):
-    #     return _index_note_sections(year, subs, parent=None)
-    # # parsing 브랜치 신 포맷: 주석 번호가 직접 키로 저장됨
-    # return _index_note_sections(year, section_data, parent=None)
-    return _index_note_sections(year, company, section_data.get("sub_sections", {}), parent=None)
+    return docs
 
 
-def _index_note_sections(
+def _parse_notes(year: int, company: str, section_data: dict) -> list[NormalizedDocument]:
+    """주석 섹션을 재귀적으로 순회하며 NormalizedDocument 리스트로 변환."""
+    return _parse_note_sections(year, company, section_data.get("sub_sections", {}), parent=None)
+
+
+def _parse_note_sections(
     year: int, company: str, sections: dict, parent: Optional[str]
-) -> int:
-    count = 0
+) -> list[NormalizedDocument]:
+    docs: list[NormalizedDocument] = []
     for key, data in sections.items():
         if not isinstance(data, dict):
             continue
@@ -283,7 +308,6 @@ def _index_note_sections(
         title = data.get("title", key)
         content = data.get("content", "").strip()
 
-        # 테이블도 텍스트로 변환
         table_texts = [_table_to_text(t) for t in data.get("tables", [])]
         full_content = content
         if table_texts:
@@ -291,7 +315,7 @@ def _index_note_sections(
 
         if full_content.strip():
             doc_id = f"{company}_주석_{year}_{key}"
-            _store[doc_id] = NormalizedDocument(
+            docs.append(NormalizedDocument(
                 doc_id=doc_id,
                 doc_type="note",
                 year=year,
@@ -299,15 +323,13 @@ def _index_note_sections(
                 section=key,
                 content=f"[{company} {year}년 주석 {key} {title}]\n{full_content}",
                 parent_section=parent,
-            )
-            count += 1
+            ))
 
-        # 재귀: sub_sections
         sub = data.get("sub_sections", {})
         if sub:
-            count += _index_note_sections(year, company, sub, parent=key)
+            docs.extend(_parse_note_sections(year, company, sub, parent=key))
 
-    return count
+    return docs
 
 
 # ── 유틸 ──────────────────────────────────────────────────────────────────────
