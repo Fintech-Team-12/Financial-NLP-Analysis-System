@@ -1,7 +1,16 @@
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
+
+_log = logging.getLogger(__name__)
+
+try:
+    import anthropic as _anthropic_sdk
+    _ANTHROPIC_AVAILABLE = True
+except ImportError:
+    _ANTHROPIC_AVAILABLE = False
 
 
 MAX_CONTEXTS = 5
@@ -118,28 +127,72 @@ def generate_mock_answer(question: str, results: list[dict[str, Any]]) -> dict[s
     }
 
 
+def _call_claude(prompt: str) -> str:
+    """
+    Anthropic Claude API 호출.
+    ANTHROPIC_API_KEY / CLAUDE_MODEL 환경변수 사용.
+    실패 시 예외를 그대로 올린다 (호출자가 폴백 처리).
+    """
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+    client = _anthropic_sdk.Anthropic(api_key=api_key)
+    resp = client.messages.create(
+        model=model,
+        max_tokens=1024,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return resp.content[0].text
+
+
 def generate_answer(question: str, results: list[dict[str, Any]]) -> dict[str, Any]:
     """
-    현재는 mock 기반.
-    나중에 실제 LLM API / 로컬 모델 호출로 쉽게 교체 가능.
+    retrieval 결과 → 최종 답변 생성.
+
+    우선순위:
+      1. LLM_MODE=mock          → 항상 mock (테스트/개발용)
+      2. ANTHROPIC_API_KEY 설정 → Claude API 실제 호출
+      3. 그 외                  → mock 폴백
     """
-    llm_mode = os.getenv("LLM_MODE", "mock").lower()
+    # LLM_MODE=mock → 강제 mock / 미설정 → API 키 유무로 자동 판단
+    llm_mode = os.getenv("LLM_MODE", "").lower()
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
 
     prompt = build_answer_prompt(question, results)
 
+    # ── mock 강제 모드 ──────────────────────────────────────────────────────
     if llm_mode == "mock":
         response = generate_mock_answer(question, results)
         response["prompt_preview"] = truncate_text(prompt, 1000)
         return response
 
-    # 실제 LLM 연결 전 placeholder
-    return {
-        "answer": "LLM_MODE가 mock이 아니지만 실제 모델 호출은 아직 연결되지 않았습니다.",
-        "evidence_summary": [],
-        "used_context_count": min(len(results), MAX_CONTEXTS),
-        "model_name": "not-connected",
-        "prompt_preview": truncate_text(prompt, 1000),
-    }
+    # ── Claude API 실제 호출 ────────────────────────────────────────────────
+    if _ANTHROPIC_AVAILABLE and api_key:
+        try:
+            model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+            answer = _call_claude(prompt)
+            return {
+                "answer": answer,
+                "evidence_summary": [
+                    {
+                        "section_title": (item.get("metadata") or {}).get("section_title", ""),
+                        "year": (item.get("metadata") or {}).get("year", ""),
+                    }
+                    for item in results[:MAX_CONTEXTS]
+                ],
+                "used_context_count": min(len(results), MAX_CONTEXTS),
+                "model_name": model,
+            }
+        except Exception as exc:
+            _log.warning("Claude API 호출 실패 (%s), mock으로 폴백", exc)
+            response = generate_mock_answer(question, results)
+            response["model_name"] = "mock-llm (claude fallback)"
+            return response
+
+    # ── API 키 없음 → mock 폴백 ─────────────────────────────────────────────
+    _log.warning("ANTHROPIC_API_KEY 미설정, mock 응답 사용")
+    response = generate_mock_answer(question, results)
+    response["prompt_preview"] = truncate_text(prompt, 1000)
+    return response
 
 
 if __name__ == "__main__":

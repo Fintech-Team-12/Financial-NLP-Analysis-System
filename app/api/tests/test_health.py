@@ -27,7 +27,7 @@ def test_health_empty_before_ingest(client: TestClient) -> None:
 
 def test_health_after_ingest(client: TestClient) -> None:
     """인덱싱 후 문서 수가 증가하고 연도가 등록된다."""
-    client.post("/reports/ingest", json={"year": 2023})
+    client.post("/api/reports/ingest", json={"year": 2023})
     data = client.get("/health").json()
     assert data["total_documents"] > 0
     assert 2023 in data["indexed_years"]

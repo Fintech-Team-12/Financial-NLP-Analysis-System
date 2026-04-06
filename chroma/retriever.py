@@ -18,7 +18,10 @@ CollectionType = Literal["text", "table", "mixed"]
 
 
 def get_client() -> chromadb.PersistentClient:
-    return chromadb.PersistentClient(path=str(CHROMA_PATH))
+    return chromadb.PersistentClient(
+        path=str(CHROMA_PATH),
+        settings=chromadb.Settings(anonymized_telemetry=False),
+    )
 
 def get_collection(collection_type: Literal["text", "table"]):
     client = get_client()
