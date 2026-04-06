@@ -456,7 +456,6 @@ def main():
     base_dir = Path(__file__).resolve().parent
     
     # 2. 상위로 이동: project_root/chroma/
-    # 은서님 로직대로 project_dir을 잡으려면 여기서 한 번 더 올라가야 project_root가 됩니다.
     project_dir = base_dir.parent.parent 
 
     # 3. 입력 경로: project_root/data/processed/
