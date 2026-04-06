@@ -38,6 +38,7 @@ def google_auth(req: GoogleLoginRequest, db: Session = Depends(get_db)):
     token = req.google_token
 
     # ── 1. 디버그용 bypass 토큰 ──────────────────────────────────────────────
+    # 추후 수정 필요!
     if token == "debug_dummy_token":
         email = "debug_user@example.com"
         name = "개발자용 더미 유저"

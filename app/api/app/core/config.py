@@ -21,7 +21,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 # .env 자동 로딩 — app/api/app/.env 우선, 없으면 프로젝트 루트 .env
 try:
     from dotenv import load_dotenv
-    _env_file = _PROJECT_ROOT / "app" / "api" / "app" / ".env"
+    _env_file = _PROJECT_ROOT / "app" / "api" / ".env"
     if not _env_file.exists():
         _env_file = _PROJECT_ROOT / ".env"
     if _env_file.exists():

@@ -15,16 +15,27 @@ async def lifespan(app: FastAPI):
     from app.db.init_db import create_tables
     create_tables()
 
-    # ── 2. 데이터 파싱 파이프라인 자동 실행 (Raw -> Processed) ──
-    # data/processed 디렉토리가 없거나 비어있는 경우를 위해 기동 시 자동 파싱 시도
-    try:
-        # config.py 에서 이미 sys.path 에 app/ingest/src 를 추가했으므로 직접 import 가능
-        from pipeline import main as run_ingest_pipeline
-        print("🚀 Starting auto-ingest pipeline (Raw -> Processed)...")
-        run_ingest_pipeline()
-        print("✅ Auto-ingest pipeline completed.")
-    except Exception as e:
-        print(f"⚠️ Failed to run auto-ingest pipeline: {e}")
+    # ── 2. 데이터 파싱 통합 파이프라인 자동 실행 (HTM -> JSON -> SQLite) ──
+    from app.core.config import settings as _cfg
+    if not _cfg.mock_mode:
+        try:
+            import sys
+            import subprocess
+            from pathlib import Path
+            
+            project_root = Path(__file__).resolve().parents[3]
+            auto_pipe_script = project_root / "chroma" / "data_process" / "auto_pipeline.py"
+            
+            if auto_pipe_script.exists():
+                print("🚀 Starting Smart Auto-Pipeline (HTM -> JSON -> SQLite)...")
+                subprocess.run([sys.executable, str(auto_pipe_script)], check=True)
+                print("✅ Auto-Pipeline completed.")
+            else:
+                print(f"⚠️ Auto-Pipeline script not found: {auto_pipe_script}")
+        except Exception as e:
+            print(f"⚠️ Failed to run Auto-Pipeline: {e}")
+    else:
+        print("⏭️ Mock Mode enabled: Skipping heavy offline data pipeline.")
 
     # ── 3. 검색 엔진 인덱싱 (Processed -> DB) ──
     from app.services import indexing, vector_store

@@ -30,6 +30,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import os
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
 import chromadb
 from chromadb.utils import embedding_functions
 

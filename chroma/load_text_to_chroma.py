@@ -1,5 +1,7 @@
 import sqlite3
 from pathlib import Path
+import os
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
 import chromadb
 from chromadb.utils import embedding_functions
 
@@ -9,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent
 # SQLite DB 경로와 Chroma 저장 경로 지정
 # -----------------------------------------
 SQLITE_DIR = BASE_DIR / "data_process" / "sqlite_by_year"
-CHROMA_PATH = BASE_DIR / "chroma_store"
+CHROMA_PATH = BASE_DIR.parent / "chroma_store"
 
 print(f"🔍 실제 탐색 경로: {SQLITE_DIR.resolve()}")
 COLLECTION_NAME = "audit_reports_10years_text_minilm"
@@ -112,7 +114,10 @@ for db_file in db_files:
 # Chroma client 연결 및 컬렉션 초기화
 # 기존 컬렉션이 있으면 삭제 후 새로 생성
 # -----------------------------------------
-client = chromadb.PersistentClient(path=CHROMA_PATH)
+client = chromadb.PersistentClient(
+    path=str(CHROMA_PATH),
+    settings=chromadb.Settings(anonymized_telemetry=False)
+)
 
 try:
     client.delete_collection(name=COLLECTION_NAME)
