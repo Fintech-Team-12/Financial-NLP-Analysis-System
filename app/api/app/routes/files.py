@@ -1,13 +1,27 @@
 """GET /api/files/{report_id}/status — 업로드 파일 ChromaDB 색인 상태 조회."""
 from __future__ import annotations
 
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.auth_deps import get_current_user, get_db
+from app.core.config import settings
 from app.db.models import IngestionJob, UploadedReport, User
 
 router = APIRouter()
+
+
+@router.get("/files/check")
+def check_file_exists(
+    filename: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    exists_db = db.query(UploadedReport).filter(UploadedReport.filename == filename).first() is not None
+    raw_path = Path(settings._project_root) / "data" / "raw" / filename
+    exists_raw = raw_path.exists()
+    return {"exists": exists_db or exists_raw}
 
 
 @router.get("/files/{report_id}/status")

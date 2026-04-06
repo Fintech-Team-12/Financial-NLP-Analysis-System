@@ -21,27 +21,42 @@ const FileUploader = ({ onClose }) => {
     setIsDragging(false);
   };
 
+  const checkAndSetFile = async (selectedFile) => {
+    if (selectedFile.name.toLowerCase().endsWith('.htm') || selectedFile.name.toLowerCase().endsWith('.html')) {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await axios.get(`http://localhost:8000/api/files/check?filename=${encodeURIComponent(selectedFile.name)}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (response.data.exists) {
+          const confirmOverride = window.confirm(`'${selectedFile.name}' 파일은 이미 업로드된 적이 있습니다.\n기존 데이터를 덮어쓰시겠습니까?`);
+          if (!confirmOverride) {
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            return;
+          }
+        }
+        setFile(selectedFile);
+      } catch (error) {
+        console.error("Failed to check file existence", error);
+        setFile(selectedFile); // 에러시 그냥 진행
+      }
+    } else {
+      alert('.htm 또는 .html 파일만 업로드 가능합니다.');
+    }
+  };
+
   const handleDrop = (e) => {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const dropFile = e.dataTransfer.files[0];
-      if (dropFile.name.toLowerCase().endsWith('.htm') || dropFile.name.toLowerCase().endsWith('.html')) {
-        setFile(dropFile);
-      } else {
-        alert('.htm 또는 .html 파일만 업로드 가능합니다.');
-      }
+      checkAndSetFile(e.dataTransfer.files[0]);
     }
   };
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
-      const selectFile = e.target.files[0];
-      if (selectFile.name.toLowerCase().endsWith('.htm') || selectFile.name.toLowerCase().endsWith('.html')) {
-        setFile(selectFile);
-      } else {
-        alert('.htm 또는 .html 파일만 업로드 가능합니다.');
-      }
+      checkAndSetFile(e.target.files[0]);
     }
   };
 
