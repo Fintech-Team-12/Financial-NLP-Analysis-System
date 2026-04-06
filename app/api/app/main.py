@@ -5,6 +5,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRouter
 
+from pydantic import BaseModel
+from chroma.search_pipeline import build_search_plan
+
 from app.routes import health, ingest, auth, chats, upload, files as files_router
 from app.routes import chat as chat_qa  # qa.py → chat.py 로 리네임
 
