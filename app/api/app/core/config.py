@@ -4,11 +4,27 @@
 """
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
 
 # config.py 위치: {project_root}/app/api/app/core/config.py
 # parents[4]    = {project_root}
 # 실행 디렉토리(CWD)에 무관하게 프로젝트 루트 기준 절대경로를 계산한다.
+
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
+
+# .env 파일을 app/api/.env 에서 명시적으로 로드
+_API_ENV = _PROJECT_ROOT / "app" / "api" / ".env"
+_env_loaded = load_dotenv(_API_ENV, override=True)
+print(f"[config] .env loaded={_env_loaded}, path={_API_ENV}, exists={_API_ENV.exists()}")
+print(f"[config] ANTHROPIC_API_KEY={'SET' if os.getenv('ANTHROPIC_API_KEY') else 'NOT SET'}")
+print(f"[config] MOCK_MODE={os.getenv('MOCK_MODE', 'not set')}")
+
+# ── 모듈 탐색 경로 정규화 ──────────────────────────────────────────────────
+# 프로젝트 루트를 sys.path 상단에 추가하여 app.ingest 등 상위 패키지 접근 가능하게 함
+import sys
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 
 class Settings:
@@ -43,7 +59,7 @@ class Settings:
     # enriched JSON 위치 — POST /vector/index (비상 재적재 용도) 에서만 사용
     # 팀원 enrich_flattened_for_rag.py 출력 디렉토리와 동일
     chroma_enriched_data_dir: str = os.getenv(
-        "CHROMA_ENRICHED_DATA_DIR", "chroma/enriched_data"
+        "CHROMA_ENRICHED_DATA_DIR", str(_PROJECT_ROOT / "chroma" / "data_process" / "enriched_data")
     )
 
     # ── ChromaDB — HTTP 클라이언트 (미래 확장, 현재 미사용) ─────────────────

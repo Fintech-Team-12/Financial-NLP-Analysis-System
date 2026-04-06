@@ -153,9 +153,9 @@ class ClaudeGenerator(GeneratorBase):
         question: str,
         docs: list[NormalizedDocument],
         question_type: QuestionType,
-    ) -> QAResponse:
+    ) -> ChatResponse:
         if not docs:
-            return QAResponse(
+            return ChatResponse(
                 answer="관련 문서를 찾을 수 없습니다.",
                 citations=[],
                 question_type=question_type,
@@ -190,7 +190,7 @@ class ClaudeGenerator(GeneratorBase):
             for doc in docs
         ]
 
-        return QAResponse(
+        return ChatResponse(
             answer=answer,
             citations=citations,
             question_type=question_type,
@@ -214,6 +214,8 @@ def get_generator() -> GeneratorBase:
       (또는 .env 파일에 추가 후 서버 재시작)
     """
     from app.core.config import settings
+
+    print(f"[answering] mock_mode={settings.mock_mode}, _ANTHROPIC_AVAILABLE={_ANTHROPIC_AVAILABLE}, api_key={'SET' if settings.anthropic_api_key else 'EMPTY'}")
 
     if settings.mock_mode:
         return MockGenerator()

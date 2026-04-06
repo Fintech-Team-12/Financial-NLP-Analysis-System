@@ -10,18 +10,43 @@ from app.routes import chat as chat_qa  # qa.py → chat.py 로 리네임
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # DB 테이블 자동 생성
+    # ── 1. DB 환경 준비 ──
     from app.db.init_db import create_tables
     create_tables()
 
-    # startup: processed JSON → in-memory 인덱스 자동 적재
-    # 파일이 없는 연도는 조용히 스킵 (FileNotFoundError 무시)
-    from app.services.indexing import ingest_year
+    # ── 2. 데이터 파싱 파이프라인 자동 실행 (Raw -> Processed) ──
+    # data/processed 디렉토리가 없거나 비어있는 경우를 위해 기동 시 자동 파싱 시도
+    try:
+        # config.py 에서 이미 sys.path 에 app/ingest/src 를 추가했으므로 직접 import 가능
+        from pipeline import main as run_ingest_pipeline
+        print("🚀 Starting auto-ingest pipeline (Raw -> Processed)...")
+        run_ingest_pipeline()
+        print("✅ Auto-ingest pipeline completed.")
+    except Exception as e:
+        print(f"⚠️ Failed to run auto-ingest pipeline: {e}")
+
+    # ── 3. 검색 엔진 인덱싱 (Processed -> DB) ──
+    from app.services import indexing, vector_store
+    from app.core.config import settings as _cfg
+
     for year in range(2014, 2025):
+        # (1) 인메모리 구조화 데이터 적재 (전체 모드 공통)
         try:
-            ingest_year(year)
-        except FileNotFoundError:
+            indexing.ingest_year(year)
+        except Exception:
             pass
+        
+        # (2) ChromaDB 벡터 데이터 적재 (Mock 모드 아닐 때만)
+        if not _cfg.mock_mode:
+            try:
+                # 이미 적재된 연도는 함수 내부에서 자동으로 스킵함
+                res = vector_store.index_year(year)
+                if res.get("indexed", 0) > 0:
+                    print(f"📦 Indexed ChromaDB for year {year}: {res['indexed']} chunks added.")
+            except Exception as e:
+                # 인덱싱 실패가 서버 구동을 막지 않도록 로그만 출력
+                if "Enriched data" not in str(e): # 파일 없는 경우는 흔하므로 스킵
+                    print(f"⚠️ Failed to index ChromaDB for year {year}: {e}")
     yield
 
 
@@ -53,7 +78,7 @@ except ImportError:
 
 # Frontend 연동용 API 엔드포인트
 app.include_router(ingest.router, tags=["ingest"])
-app.include_router(chat_qa.router, tags=["chat"])
-app.include_router(auth.router, tags=["auth"])
-app.include_router(chats.router, tags=["chats"])
-app.include_router(upload.router, tags=["upload"])
+app.include_router(chat_qa.router, prefix="/api", tags=["chat"])
+app.include_router(auth.router, prefix="/api", tags=["auth"])
+app.include_router(chats.router, prefix="/api", tags=["chats"])
+app.include_router(upload.router, prefix="/api", tags=["upload"])

@@ -72,8 +72,12 @@ def _get_client() -> chromadb.ClientAPI:
         return chromadb.HttpClient(
             host=settings.chroma_host,
             port=settings.chroma_port,
+            settings=chromadb.Settings(anonymized_telemetry=False)
         )
-    return chromadb.PersistentClient(path=settings.chroma_persist_path)
+    return chromadb.PersistentClient(
+        path=settings.chroma_persist_path,
+        settings=chromadb.Settings(anonymized_telemetry=False)
+    )
 
 
 # ── 공개 API ─────────────────────────────────────────────────────────────────
@@ -177,11 +181,14 @@ def index_year(year: int, force: bool = False) -> dict[str, Any]:
 
     비상 재적재는 text 컬렉션에만 추가한다 (table 분리 파이프라인 미지원).
     """
-    enriched_path = (
-        Path(settings.chroma_enriched_data_dir) / f"audit_report_{year}_enriched.json"
-    )
-    if not enriched_path.exists():
-        raise FileNotFoundError(f"Enriched data not found: {enriched_path}")
+    # 실제 파일명 패턴: 삼성전자_audit_report_2014_enriched.json
+    pattern = f"*_audit_report_{year}_enriched.json"
+    enriched_files = list(Path(settings.chroma_enriched_data_dir).glob(pattern))
+
+    if not enriched_files:
+        raise FileNotFoundError(f"Enriched data for year {year} not found in {settings.chroma_enriched_data_dir}")
+
+    enriched_path = enriched_files[0]
 
     with enriched_path.open("r", encoding="utf-8") as f:
         records: list[dict] = json.load(f)

@@ -259,17 +259,17 @@ def _index_financial_statement(year: int, company: str, section_name: str, secti
 
 def _index_notes(year: int, company: str, section_data: dict) -> int:
     """주석 섹션을 재귀적으로 순회하며 문서로 변환.
-    return _index_note_sections(year, company, section_data.get("sub_sections", {}), parent=None)
 
     두 가지 JSON 포맷을 모두 지원:
       구 포맷 (테스트 픽스처): {"sub_sections": {"5": {...}, "8": {...}}}
       신 포맷 (parsing 브랜치): {"1": {...}, "30": {...}}  — sub_sections 키 없음
     """
-    subs = section_data.get("sub_sections")
-    if subs and isinstance(subs, dict):
-        return _index_note_sections(year, subs, parent=None)
-    # parsing 브랜치 신 포맷: 주석 번호가 직접 키로 저장됨
-    return _index_note_sections(year, section_data, parent=None)
+    # subs = section_data.get("sub_sections")
+    # if subs and isinstance(subs, dict):
+    #     return _index_note_sections(year, subs, parent=None)
+    # # parsing 브랜치 신 포맷: 주석 번호가 직접 키로 저장됨
+    # return _index_note_sections(year, section_data, parent=None)
+    return _index_note_sections(year, company, section_data.get("sub_sections", {}), parent=None)
 
 
 def _index_note_sections(
