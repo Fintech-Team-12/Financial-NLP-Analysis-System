@@ -12,7 +12,7 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [chatTitle, setChatTitle] = useState('New Chatting');
-  const [selectedModel, setSelectedModel] = useState('claude-4.6-sonnet');
+  const [selectedModel, setSelectedModel] = useState('claude|claude-sonnet-4-6');
 
   const messagesEndRef = useRef(null);
 
@@ -68,9 +68,11 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
     setMessages(prev => [...prev, { id: 'optimistic', role: 'user', content: userMessageContent }]);
 
     try {
+      const [provider, model] = selectedModel.split('|');
       const payload = {
         question: userMessageContent,
-        model: selectedModel,
+        provider: provider,
+        model: model,
       };
 
       if (currentChatId) {
@@ -136,8 +138,9 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
               fontSize: '0.85rem'
             }}
           >
-            <option value="claude-4.6-sonnet">Claude Sonnet 4.6</option>
-            {/* 향후 Ollama/DeepSeek 모델 등 추가 시 파싱 구문이나 렌더링은 동일하게 호환됩니다 */}
+            <option value="claude|claude-sonnet-4-6">Claude Sonnet 4.6</option>
+            <option value="ollama|llama3">Ollama Llama 3</option>
+            <option value="mock|mock-llm">Mock LLM (테스트용)</option>
           </select>
         </div>
       </header>

@@ -207,8 +207,6 @@ def generate_answer(
     model 인자는 해당 provider 안에서 사용할 모델명 오버라이드.
     """
     # LLM_MODE=mock → 강제 mock / 미설정 → API 키 유무로 자동 판단
-    llm_mode = os.getenv("LLM_MODE", "").lower()
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
 
     prompt = build_answer_prompt(question, results, chat_history=chat_history)
 

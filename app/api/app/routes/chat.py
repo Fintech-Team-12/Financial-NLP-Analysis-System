@@ -92,7 +92,7 @@ def ask(
 
     # ── 3. RAG 파이프라인 실행 ────────────────────────────────────────────────
     try:
-        rag_out = run_rag(req.question, provider=req.provider, model=req.model)
+        rag_out = run_rag(req.question, provider=req.provider, model=req.model, chat_history=chat_history)
     except Exception as exc:
         _log.error("run_rag() 실패: %s", exc)
         error_answer = "검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
