@@ -795,7 +795,7 @@ def parse_appendix(soup):
     appendix_data["sub_sections"] = final_sub_sections
 
     return {"부록": appendix_data}
-
+'''
 def parse_complex_notes(html_content):
     soup = BeautifulSoup(re.sub(r"\r?\n", "", html_content), "html.parser")
     for tag in soup.find_all(["span", "font", "b", "strong", "i", "em", "u"]):
@@ -961,7 +961,194 @@ def parse_complex_notes(html_content):
                     active_node["content"] += " " + check_line
 
     return {"주석": clean_tree(final_data)}
+'''
 
+def parse_complex_notes(html_content):
+
+    soup = BeautifulSoup(re.sub(r"\r?\n", "", html_content), "html.parser")
+    
+    # [보완 2] 2018년 핵심 해결: <br> 태그를 줄바꿈(\n)으로 치환
+    # 이렇게 하면 하나의 <p> 안에 제목과 본문이 섞여 있어도 lines에서 별개의 줄로 분리됩니다.
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+
+    for tag in soup.find_all(["span", "font", "b", "strong", "i", "em", "u"]):
+        tag.unwrap()
+    soup.smooth()
+
+    stop_node = soup.find(id="toc_5")
+    if stop_node:
+        for sibling in stop_node.find_all_next():
+            sibling.decompose()
+        stop_node.decompose()
+
+    table_store = {}
+    all_captured_footnotes = set()
+    for idx, table in enumerate(soup.find_all("table")):
+        if table.find("table"):
+            continue
+        res = html_table_to_dict_notes(table)
+        if res:
+            tid = f"[[TABLE_{idx}]]"
+            if "captured_texts" in res:
+                all_captured_footnotes.update(res["captured_texts"])
+            table_store[tid] = res
+            table.replace_with(f"\n{tid}\n")
+
+    # [보완 3] separator를 "\n"으로 설정하여 위에서 바꾼 줄바꿈들이 명확히 구분되게 함
+    pure_text = (
+        soup.get_text(separator="\n", strip=True)
+        .replace("\xa0", " ")
+        .replace("\u2002", " ")
+        .replace("\u2003", " ")
+    )
+    pure_text = re.sub(r"(\d)\s+(?=\d)", r"\1", pure_text)
+    pure_text = re.sub(
+        r"(\.)\s*(\d{1,2})\s*\.\s*([^:\n]+?)\s*:\s*", r"\1\n\2. \3\n", pure_text
+    )
+
+    lines = [line.strip() for line in pure_text.split("\n") if line.strip()]
+    final_data = {}
+    curr_L1 = curr_L2 = curr_L3 = curr_L4 = curr_L5 = None
+    started = False
+    kor_ord = {chr(i): i for i in range(ord("가"), ord("하") + 1)}
+    curr_L3_char = ""
+    kill_pattern = r"[,.]?\s*\d*[.\s]*계\s*속\s*[:;]*\s*$"
+
+    for line in lines:
+        line = line.strip()
+        check_line = re.sub(kill_pattern, "", line).strip()
+        
+        # [보완 4] 시작 조건 정규화: "1 . 일반사항" 처럼 벌어진 경우도 찾기 위해 공백 제거 후 비교
+        if not started:
+            if re.match(r"^1\.\s*(일반적\s*사항|회사의\s*개요)", check_line.replace(" ", "")):
+                started = True
+            else:
+                continue
+
+        # --- 아래는 기존의 맘에 들어하신 계층화 로직을 그대로 유지합니다 ---
+        m1 = re.match(r"^(\d+)\s*\.\s*(.*)", check_line)
+        if m1 and m1.group(1).isdigit():
+            num = m1.group(1)
+            if 1 <= int(num) <= 80 and num not in final_data: # 범위를 80으로 살짝 확장
+                final_data[num] = {
+                    "title": m1.group(2).strip(),
+                    "content": "",
+                    "tables": [],
+                    "sub_sections": {},
+                }
+                curr_L1, curr_L2, curr_L3, curr_L4, curr_L5 = final_data[num], None, None, None, None
+                curr_L3_char = ""
+                continue
+        
+        m2 = re.match(r"^(\d+\.\d+)\.?\s+(.*)", check_line)
+        if m2 and curr_L1:
+            key = m2.group(1)
+            curr_L1["sub_sections"][key] = {
+                "title": m2.group(2).strip(),
+                "content": "",
+                "tables": [],
+                "sub_sections": {},
+            }
+            curr_L2, curr_L3, curr_L4, curr_L5 = curr_L1["sub_sections"][key], None, None, None
+            curr_L3_char = ""
+            continue
+            
+        m3 = re.match(r"^([가-하])\s*\.\s+(.*)", check_line)
+        if m3:
+            new_char = m3.group(1)
+            is_restart = (
+                (kor_ord.get(new_char, 0) <= kor_ord.get(curr_L3_char, 0))
+                if curr_L3_char
+                else False
+            )
+            if not is_restart:
+                parent = curr_L2 or curr_L1
+                if parent:
+                    key = new_char + "."
+                    orig_key = key
+                    counter = 1
+                    while key in parent["sub_sections"]:
+                        key = f"{orig_key}_{counter}"
+                        counter += 1
+                    parent["sub_sections"][key] = {
+                        "title": m3.group(2).strip(),
+                        "content": "",
+                        "tables": [],
+                        "sub_sections": {},
+                    }
+                    curr_L3, curr_L4, curr_L5, curr_L3_char = (
+                        parent["sub_sections"][key],
+                        None,
+                        None,
+                        new_char,
+                    )
+                    continue
+        m4 = re.match(r"^(\(\d+\))\s+(.*)", check_line)
+        if m4:
+            parent = curr_L3 or curr_L2 or curr_L1
+            if parent:
+                key = m4.group(1).strip()
+                orig_key = key
+                counter = 1
+                while key in parent["sub_sections"]:
+                    key = f"{orig_key}_{counter}"
+                    counter += 1
+                parent["sub_sections"][key] = {
+                    "title": m4.group(2).strip(),
+                    "content": "",
+                    "tables": [],
+                    "sub_sections": {},
+                }
+                curr_L4, curr_L5 = parent["sub_sections"][key], None
+                continue
+        m5 = re.match(r"^(\d+)\)\s+(.*)", check_line)
+        if m5:
+            parent = curr_L4 or curr_L3 or curr_L2 or curr_L1
+            if parent:
+                key = m5.group(1) + ")"
+                orig_key = key
+                counter = 1
+                while key in parent["sub_sections"]:
+                    key = f"{orig_key}_{counter}"
+                    counter += 1
+                parent["sub_sections"][key] = {
+                    "title": m5.group(2).strip(),
+                    "content": "",
+                    "tables": [],
+                    "sub_sections": {},
+                }
+                curr_L5 = parent["sub_sections"][key]
+                continue
+
+
+        active_node = curr_L5 or curr_L4 or curr_L3 or curr_L2 or curr_L1
+        if active_node:
+            if line in all_captured_footnotes:
+                continue
+            if re.match(r"^계\s*속\s*[:;]*$", line) or re.search(kill_pattern, line):
+                continue
+
+            if "[[TABLE_" in line:
+                for part in re.split(r"(\[\[TABLE_\d+\]\])", line):
+                    if part in table_store:
+                        active_node["tables"].append(table_store[part])
+                    elif part.strip() and part not in all_captured_footnotes:
+                        clean_part = re.sub(kill_pattern, "", part).strip()
+                        if clean_part and clean_part != active_node.get("title", ""):
+                            # 기존 내용이 있으면 공백 추가 후 누적
+                            if active_node["content"]:
+                                active_node["content"] += " " + clean_part
+                            else:
+                                active_node["content"] = clean_part
+            else:
+                if check_line and check_line != active_node.get("title", ""):
+                    if active_node["content"]:
+                        active_node["content"] += " " + check_line
+                    else:
+                        active_node["content"] = check_line
+
+    return {"주석": clean_tree(final_data)}
 
 # ==========================================
 # 3. 단일 파일 파싱 함수 (API 업로드용)
