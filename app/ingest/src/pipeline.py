@@ -15,32 +15,51 @@ from pathlib import Path
 # 회사명 자동 추출 함수
 def extract_company_name_from_html(soup):
     full_text = soup.get_text(separator=' ', strip=True)
-    head_text = full_text[:1000] 
+    # 공백 및 특수 공백 정제
+    full_text = full_text.replace('\xa0', ' ').replace('\u2002', ' ').replace('\u2003', ' ')
+    head_text = full_text[:2000]  # 탐색 범위를 조금 더 확장
 
     corp_full = r'(?:주\s*식|유\s*한|유\s*한\s*책\s*임|합\s*자|합\s*명)\s*회\s*사'
     corp_short = r'(?:주|유|합자|합명)'
     
+    # 1. "회사명 : XXX" 패턴
     match = re.search(r'회\s*사\s*명\s*[:：]\s*([가-힣a-zA-Z0-9\s\(주\)]+?)(?=\s|\[|\()', head_text)
     if match:
         name = match.group(1).replace(" ", "")
         name = re.sub(r'\([주유합명자]+\)', '', name) 
         name = re.sub(r'주식회사|유한책임회사|유한회사|합자회사|합명회사', '', name)
-        if name: 
+        if name:
             return name
 
-    match = re.search(rf'([가-힣a-zA-Z0-9]+)\s*{corp_full}', head_text)
+    # 2. "XXX 주식회사" 또는 "주식회사 XXX" 패턴 (공백 허용)
+    # 삼성전자 주식회사 등
+    match = re.search(rf'([가-힣a-zA-Z0-9\s]+?)\s*{corp_full}', head_text)
     if match:
-        return match.group(1).replace(" ", "")
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2:
+            return name
         
-    match = re.search(rf'{corp_full}\s*([가-힣a-zA-Z0-9]+)', head_text)
+    match = re.search(rf'{corp_full}\s*([가-힣a-zA-Z0-9\s]+?)', head_text)
     if match:
-        return match.group(1).replace(" ", "")
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2:
+            return name
         
-    match = re.search(rf'([가-힣a-zA-Z0-9]+)\s*\(\s*{corp_short}\s*\)', head_text)
+    # 3. (주)XXX 또는 XXX(주) 패턴
+    match = re.search(rf'([가-힣a-zA-Z0-9\s]+?)\s*\(\s*{corp_short}\s*\)', head_text)
     if match:
-        return match.group(1).replace(" ", "")
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2:
+            return name
         
-    match = re.search(rf'\(\s*{corp_short}\s*\)\s*([가-힣a-zA-Z0-9]+)', head_text)
+    match = re.search(rf'\(\s*{corp_short}\s*\)\s*([가-힣a-zA-Z0-9\s]+?)', head_text)
+    if match:
+        name = match.group(1).strip().replace(" ", "")
+        if len(name) >= 2:
+            return name
+
+    # 4. "제 XX 기" 주변에서 찾기 (DART 표준 표지 하단 패턴)
+    match = re.search(r'제\s*\d+\s*기\s*.*?([가-힣a-zA-Z0-9]+)\s*(?:주식회사|\(주\))', head_text, re.DOTALL)
     if match:
         return match.group(1).replace(" ", "")
 
@@ -70,12 +89,16 @@ def clean_amount(val):
     val_str = str(val).strip()
     if val_str == "-" or val_str == "":
         return 0
-    val_str = val_str.replace(",", "")
-    if val_str.startswith("(") and val_str.endswith(")"):
-        val_str = "-" + val_str[1:-1]
+    
+    # 🚀 숫자로 바꿀 때만 쓸 임시 변수(temp_str)를 만들어서 쉼표를 지웁니다.
+    temp_str = val_str.replace(",", "")
+    if temp_str.startswith("(") and temp_str.endswith(")"):
+        temp_str = "-" + temp_str[1:-1]
+        
     try:
-        return int(float(val_str))
+        return int(float(temp_str))
     except ValueError:
+        # 숫자로 바꾸기 실패하면 쉼표가 멀쩡히 살아있는 '원본(val_str)'을 반환합니다!
         return val_str
 
 
@@ -121,8 +144,9 @@ def html_table_to_dict(table_tag, columns):
         if text == '-':
             return '0'
         
-        # 💥 내용연수 특수 기호(띄어쓰기, 쉼표, 하이픈) 모두 '~'로 완벽 복구
-        text = re.sub(r'(?<!\d)(\d{1,2})[\s,~-]+(\d{1,2})\s*년', r'\1~\2년', text)
+    # 💥 내용연수 기호 보존 로직 (쉼표는 '각각', 물결표는 '범위'를 의미하므로 구분하여 복구)
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*(,)\s*(\d{1,2})\s*년', r'\1, \3년', text)
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*([~-])\s*(\d{1,2})\s*년', r'\1~\3년', text)
         
         return text
 
@@ -266,10 +290,12 @@ def html_table_to_dict_notes(table_tag):
         if text == '-':
             return '0'
         
-        # 💥 내용연수 특수 기호(띄어쓰기, 쉼표, 하이픈) 모두 '~'로 완벽 복구
-        text = re.sub(r'(?<!\d)(\d{1,2})[\s,~-]+(\d{1,2})\s*년', r'\1~\2년', text)
+        # 💥 내용연수 특수기호 완벽 분리 로직 (순서 중요!)
+        # 1. 물결(~)이나 하이픈(-)이 명확히 있으면 '범위'로 인정
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*[~-]\s*(\d{1,2})\s*년', r'\1~\2년', text)
         
-        text = re.sub(r'\(\s*-?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(%?)\s*\)', r'-\1\2', text)
+        # 2. 쉼표(,), 가운뎃점(·), 슬래시(/) 또는 단순 띄어쓰기로 띄워져 있으면 '각각'으로 간주하여 쉼표로 통일
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*[,·/\s]+\s*(\d{1,2})\s*년', r'\1, \2년', text)
         return re.sub(r'(?<!\d)-?\d+(?:,\d{3})*(?:\.\d+)?(?!\d)', lambda m: m.group(0).replace(',', ''), text)
 
     df_cleaned = df.map(clean_cell_notes) if hasattr(df, 'map') else df.applymap(clean_cell_notes)
@@ -769,7 +795,7 @@ def parse_appendix(soup):
     appendix_data["sub_sections"] = final_sub_sections
 
     return {"부록": appendix_data}
-
+'''
 def parse_complex_notes(html_content):
     soup = BeautifulSoup(re.sub(r"\r?\n", "", html_content), "html.parser")
     for tag in soup.find_all(["span", "font", "b", "strong", "i", "em", "u"]):
@@ -935,10 +961,295 @@ def parse_complex_notes(html_content):
                     active_node["content"] += " " + check_line
 
     return {"주석": clean_tree(final_data)}
+'''
+
+def parse_complex_notes(html_content):
+
+    soup = BeautifulSoup(re.sub(r"\r?\n", "", html_content), "html.parser")
+    
+    # [보완 2] 2018년 핵심 해결: <br> 태그를 줄바꿈(\n)으로 치환
+    # 이렇게 하면 하나의 <p> 안에 제목과 본문이 섞여 있어도 lines에서 별개의 줄로 분리됩니다.
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+
+    for tag in soup.find_all(["span", "font", "b", "strong", "i", "em", "u"]):
+        tag.unwrap()
+    soup.smooth()
+
+    stop_node = soup.find(id="toc_5")
+    if stop_node:
+        for sibling in stop_node.find_all_next():
+            sibling.decompose()
+        stop_node.decompose()
+
+    table_store = {}
+    all_captured_footnotes = set()
+    for idx, table in enumerate(soup.find_all("table")):
+        if table.find("table"):
+            continue
+        res = html_table_to_dict_notes(table)
+        if res:
+            tid = f"[[TABLE_{idx}]]"
+            if "captured_texts" in res:
+                all_captured_footnotes.update(res["captured_texts"])
+            table_store[tid] = res
+            table.replace_with(f"\n{tid}\n")
+
+    # [보완 3] separator를 "\n"으로 설정하여 위에서 바꾼 줄바꿈들이 명확히 구분되게 함
+    pure_text = (
+        soup.get_text(separator="\n", strip=True)
+        .replace("\xa0", " ")
+        .replace("\u2002", " ")
+        .replace("\u2003", " ")
+    )
+    pure_text = re.sub(r"(\d)\s+(?=\d)", r"\1", pure_text)
+    pure_text = re.sub(
+        r"(\.)\s*(\d{1,2})\s*\.\s*([^:\n]+?)\s*:\s*", r"\1\n\2. \3\n", pure_text
+    )
+
+    lines = [line.strip() for line in pure_text.split("\n") if line.strip()]
+    final_data = {}
+    curr_L1 = curr_L2 = curr_L3 = curr_L4 = curr_L5 = None
+    started = False
+    kor_ord = {chr(i): i for i in range(ord("가"), ord("하") + 1)}
+    curr_L3_char = ""
+    kill_pattern = r"[,.]?\s*\d*[.\s]*계\s*속\s*[:;]*\s*$"
+
+    for line in lines:
+        line = line.strip()
+        check_line = re.sub(kill_pattern, "", line).strip()
+        
+        # [보완 4] 시작 조건 정규화: "1 . 일반사항" 처럼 벌어진 경우도 찾기 위해 공백 제거 후 비교
+        if not started:
+            if re.match(r"^1\.\s*(일반적\s*사항|회사의\s*개요)", check_line.replace(" ", "")):
+                started = True
+            else:
+                continue
+
+        # --- 아래는 기존의 맘에 들어하신 계층화 로직을 그대로 유지합니다 ---
+        m1 = re.match(r"^(\d+)\s*\.\s*(.*)", check_line)
+        if m1 and m1.group(1).isdigit():
+            num = m1.group(1)
+            if 1 <= int(num) <= 80 and num not in final_data: # 범위를 80으로 살짝 확장
+                final_data[num] = {
+                    "title": m1.group(2).strip(),
+                    "content": "",
+                    "tables": [],
+                    "sub_sections": {},
+                }
+                curr_L1, curr_L2, curr_L3, curr_L4, curr_L5 = final_data[num], None, None, None, None
+                curr_L3_char = ""
+                continue
+        
+        m2 = re.match(r"^(\d+\.\d+)\.?\s+(.*)", check_line)
+        if m2 and curr_L1:
+            key = m2.group(1)
+            curr_L1["sub_sections"][key] = {
+                "title": m2.group(2).strip(),
+                "content": "",
+                "tables": [],
+                "sub_sections": {},
+            }
+            curr_L2, curr_L3, curr_L4, curr_L5 = curr_L1["sub_sections"][key], None, None, None
+            curr_L3_char = ""
+            continue
+            
+        m3 = re.match(r"^([가-하])\s*\.\s+(.*)", check_line)
+        if m3:
+            new_char = m3.group(1)
+            is_restart = (
+                (kor_ord.get(new_char, 0) <= kor_ord.get(curr_L3_char, 0))
+                if curr_L3_char
+                else False
+            )
+            if not is_restart:
+                parent = curr_L2 or curr_L1
+                if parent:
+                    key = new_char + "."
+                    orig_key = key
+                    counter = 1
+                    while key in parent["sub_sections"]:
+                        key = f"{orig_key}_{counter}"
+                        counter += 1
+                    parent["sub_sections"][key] = {
+                        "title": m3.group(2).strip(),
+                        "content": "",
+                        "tables": [],
+                        "sub_sections": {},
+                    }
+                    curr_L3, curr_L4, curr_L5, curr_L3_char = (
+                        parent["sub_sections"][key],
+                        None,
+                        None,
+                        new_char,
+                    )
+                    continue
+        m4 = re.match(r"^(\(\d+\))\s+(.*)", check_line)
+        if m4:
+            parent = curr_L3 or curr_L2 or curr_L1
+            if parent:
+                key = m4.group(1).strip()
+                orig_key = key
+                counter = 1
+                while key in parent["sub_sections"]:
+                    key = f"{orig_key}_{counter}"
+                    counter += 1
+                parent["sub_sections"][key] = {
+                    "title": m4.group(2).strip(),
+                    "content": "",
+                    "tables": [],
+                    "sub_sections": {},
+                }
+                curr_L4, curr_L5 = parent["sub_sections"][key], None
+                continue
+        m5 = re.match(r"^(\d+)\)\s+(.*)", check_line)
+        if m5:
+            parent = curr_L4 or curr_L3 or curr_L2 or curr_L1
+            if parent:
+                key = m5.group(1) + ")"
+                orig_key = key
+                counter = 1
+                while key in parent["sub_sections"]:
+                    key = f"{orig_key}_{counter}"
+                    counter += 1
+                parent["sub_sections"][key] = {
+                    "title": m5.group(2).strip(),
+                    "content": "",
+                    "tables": [],
+                    "sub_sections": {},
+                }
+                curr_L5 = parent["sub_sections"][key]
+                continue
+
+
+        active_node = curr_L5 or curr_L4 or curr_L3 or curr_L2 or curr_L1
+        if active_node:
+            if line in all_captured_footnotes:
+                continue
+            if re.match(r"^계\s*속\s*[:;]*$", line) or re.search(kill_pattern, line):
+                continue
+
+            if "[[TABLE_" in line:
+                for part in re.split(r"(\[\[TABLE_\d+\]\])", line):
+                    if part in table_store:
+                        active_node["tables"].append(table_store[part])
+                    elif part.strip() and part not in all_captured_footnotes:
+                        clean_part = re.sub(kill_pattern, "", part).strip()
+                        if clean_part and clean_part != active_node.get("title", ""):
+                            # 기존 내용이 있으면 공백 추가 후 누적
+                            if active_node["content"]:
+                                active_node["content"] += " " + clean_part
+                            else:
+                                active_node["content"] = clean_part
+            else:
+                if check_line and check_line != active_node.get("title", ""):
+                    if active_node["content"]:
+                        active_node["content"] += " " + check_line
+                    else:
+                        active_node["content"] = check_line
+
+    return {"주석": clean_tree(final_data)}
+
+# ==========================================
+# 3. 단일 파일 파싱 함수 (API 업로드용)
+# ==========================================
+def parse_single_file(file_path: str, processed_dir: str) -> dict:
+    """
+    단일 HTML 파일을 파싱하여 structured JSON으로 변환 후 저장.
+
+    Args:
+        file_path: HTML 파일 경로
+        processed_dir: JSON 저장 디렉토리
+
+    Returns:
+        dict: {
+            "year": str,
+            "company_name": str,
+            "save_path": str,
+            "year_data": dict (파싱된 전체 데이터)
+        }
+    """
+    os.makedirs(processed_dir, exist_ok=True)
+
+    year_match = re.search(r"20\d{2}", os.path.basename(file_path))
+    year = year_match.group() if year_match else "Unknown"
+
+    try:
+        with open(file_path, "r", encoding="cp949") as f:
+            html_content = f.read()
+    except UnicodeDecodeError:
+        with open(file_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+
+    soup = BeautifulSoup(html_content, "lxml")
+    try:
+        tables = pd.read_html(io.StringIO(html_content), encoding="cp949")
+    except ValueError:
+        tables = []
+
+    company_name = extract_company_name_from_html(soup)
+    print(
+        f"[{year}년] {os.path.basename(file_path)} 처리 중... (자동인식 회사명: {company_name})"
+    )
+
+    year_data = {year: {"company": company_name}}
+
+    year_data[year].update(parse_intro(soup, company_name=company_name))
+
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "재무상태표",
+            ["유동자산", "유동부채", "이익잉여금"],
+            exclude_keywords=["자본변동표", "손익계산서"],
+        )
+    )
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "손익계산서",
+            ["매출액", "영업이익", "당기순이익"],
+            exclude_keywords=["총포괄손익", "포괄손익계산서", "자본변동표"],
+        )
+    )
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "포괄손익계산서",
+            ["기타포괄", "총포괄"],
+            exclude_keywords=["매출액", "자본금", "자본변동표"],
+        )
+    )
+    year_data[year].update(extract_equity_statement(tables, "자본변동표"))
+    year_data[year].update(
+        extract_financial_statement(
+            tables,
+            "현금흐름표",
+            ["영업활동현금흐름", "투자활동현금흐름"],
+            exclude_keywords=[],
+        )
+    )
+    year_data[year].update(parse_appendix(soup))
+    year_data[year].update(parse_complex_notes(html_content))
+
+    save_path = os.path.join(
+        processed_dir, f"{company_name}_audit_report_{year}_structured.json"
+    )
+    with open(save_path, "w", encoding="utf-8") as f:
+        json.dump(year_data, f, ensure_ascii=False, indent=4)
+
+    print(f"  -> 완료! {save_path} 생성됨.")
+
+    return {
+        "year": year,
+        "company_name": company_name,
+        "save_path": save_path,
+        "year_data": year_data,
+    }
 
 
 # ==========================================
-# 3. 메인 파이프라인 함수
+# 3-1. 배치 파이프라인 함수 (기존 호환)
 # ==========================================
 def run_pipeline(raw_dir: str, processed_dir: str):
     file_list = glob.glob(os.path.join(raw_dir, "*.htm*"))
@@ -953,78 +1264,7 @@ def run_pipeline(raw_dir: str, processed_dir: str):
     )
 
     for file_path in file_list:
-        year_match = re.search(r"20\d{2}", os.path.basename(file_path))
-        year = year_match.group() if year_match else "Unknown"
-
-        try:
-            with open(file_path, "r", encoding="cp949") as f:
-                html_content = f.read()
-        except UnicodeDecodeError:
-            with open(file_path, "r", encoding="utf-8") as f:
-                html_content = f.read()
-
-        soup = BeautifulSoup(html_content, "lxml")
-        try:
-            tables = pd.read_html(io.StringIO(html_content), encoding="cp949")
-        except ValueError:
-            tables = []
-
-        # [추가] 회사명 자동 추출
-        company_name = extract_company_name_from_html(soup)
-        print(
-            f"[{year}년] {os.path.basename(file_path)} 처리 중... (자동인식 회사명: {company_name})"
-        )
-
-        # [수정] JSON 스키마에 회사명 메타데이터 추가
-        year_data = {year: {"company": company_name}}
-
-        # [수정] 추출한 회사명을 parse_intro에 전달
-        year_data[year].update(parse_intro(soup, company_name=company_name))
-
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "재무상태표",
-                ["유동자산", "유동부채", "이익잉여금"],
-                exclude_keywords=["자본변동표", "손익계산서"],
-            )
-        )
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "손익계산서",
-                ["매출액", "영업이익", "당기순이익"],
-                exclude_keywords=["총포괄손익", "포괄손익계산서", "자본변동표"],
-            )
-        )
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "포괄손익계산서",
-                ["기타포괄", "총포괄"],
-                exclude_keywords=["매출액", "자본금", "자본변동표"],
-            )
-        )
-        year_data[year].update(extract_equity_statement(tables, "자본변동표"))
-        year_data[year].update(
-            extract_financial_statement(
-                tables,
-                "현금흐름표",
-                ["영업활동현금흐름", "투자활동현금흐름"],
-                exclude_keywords=[],
-            )
-        )
-        year_data[year].update(parse_appendix(soup))
-        year_data[year].update(parse_complex_notes(html_content))
-
-        # [수정] 저장 파일명에 회사명을 동적으로 반영 (삼성전자 하드코딩 제거)
-        save_path = os.path.join(
-            processed_dir, f"{company_name}_audit_report_{year}_structured.json"
-        )
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(year_data, f, ensure_ascii=False, indent=4)
-
-        print(f"  -> 완료! {save_path} 생성됨.")
+        parse_single_file(file_path, processed_dir)
 
     print("-" * 50 + "\n🎉 전체 파이프라인 처리가 완료되었습니다!")
 
@@ -1048,3 +1288,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

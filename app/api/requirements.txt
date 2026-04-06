@@ -1,9 +1,38 @@
+# ── Web framework ─────────────────────────────────────────────────────────────
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
+
+# ── Schema / Validation ───────────────────────────────────────────────────────
 pydantic==2.11.7
+
+# ── Relational DB (사용자/채팅이력 — RAG 벡터 데이터와 분리) ──────────────────
+sqlalchemy==2.0.41
+
+# ── HTTP client (FastAPI TestClient transport + 추후 Ollama 호출) ─────────────
 httpx==0.28.1
-pytest==8.4.1
-pytest-cov==6.2.1
-ruff==0.12.7
+
+# ── Anthropic Claude API (ANTHROPIC_API_KEY 설정 시 ClaudeGenerator 활성) ─────
+anthropic>=0.40.0
+
+# ── Vector DB (mock_mode=False 시 ChromaRetriever 에서 사용) ──────────────────
 chromadb==0.5.23
+
+# ── Embedding model (Chroma 담당자 작업 공간, mock_mode 에서는 미사용) ──────────
 sentence-transformers==3.0.1
+
+# ── Test ──────────────────────────────────────────────────────────────────────
+pytest==8.4.2
+pytest-cov==6.2.1
+anyio[trio]==4.9.0   # pytest-anyio 비동기 테스트 지원 (현재 동기 위주, 추후 확장용)
+
+# ── Authentication & Security ─────────────────────────────────────────────────
+PyJWT==2.10.1
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.12
+google-auth>=2.29.0
+
+# ── Environment & Utils ───────────────────────────────────────────────────────
+python-dotenv==1.0.1
+
+# ── Lint ──────────────────────────────────────────────────────────────────────
+ruff==0.12.7
