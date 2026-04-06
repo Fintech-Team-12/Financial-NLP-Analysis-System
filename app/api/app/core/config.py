@@ -1,17 +1,36 @@
 """
 애플리케이션 설정.
 환경변수로 주입 — Docker / 로컬 / 테스트 환경 모두 동일 코드로 동작.
+
+.env 파일 로딩:
+  app/api/.env 또는 프로젝트 루트 .env 중 존재하는 파일을 자동으로 읽는다.
+  이미 설정된 환경변수는 .env 로 덮어쓰지 않는다 (override=False).
 """
 import os
 from pathlib import Path
 
+# config.py 위치: {project_root}/app/api/app/core/config.py
+# parents[4]    = {project_root}
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
+
+# .env 자동 로딩 — app/api/.env 우선, 없으면 프로젝트 루트 .env
+try:
+    from dotenv import load_dotenv
+    _env_file = _PROJECT_ROOT / "app" / "api" / ".env"
+    if not _env_file.exists():
+        _env_file = _PROJECT_ROOT / ".env"
+    if _env_file.exists():
+        load_dotenv(_env_file, override=False)
+except ImportError:
+    pass
+
 
 class Settings:
     # ── 프로젝트 루트 경로 (config.py 위치로부터 역산) ─────────────────────────
-    _project_root: Path = Path(__file__).resolve().parents[4]
+    _project_root: Path = _PROJECT_ROOT
 
     # ── 데이터 경로 ────────────────────────────────────────────────────────────
-    data_dir: str = os.getenv("DATA_DIR", str(_project_root / "data" / "processed"))
+    data_dir: str = os.getenv("DATA_DIR", str(_PROJECT_ROOT / "data" / "processed"))
 
     # 업로드된 HTML 파일 임시 저장 경로
     upload_temp_dir: str = os.getenv("UPLOAD_TEMP_DIR", str(_project_root / "data" / "uploads_temp"))
@@ -25,10 +44,12 @@ class Settings:
     mock_mode: bool = os.getenv("MOCK_MODE", "true").lower() == "true"
 
     # ── ChromaDB — PersistentClient 경로 (현재 사용) ──────────────────────────
-    # 팀원 chroma/load_*.py 가 "./chroma_store" 에 적재.
-    # 백엔드는 동일 경로를 읽기 전용으로 사용하는 것이 원칙.
-    # Docker: WORKDIR=/workspace → /workspace/chroma_store
-    chroma_persist_path: str = os.getenv("CHROMA_PERSIST_PATH", "chroma_store")
+    # 팀원 chroma/load_*.py 가 프로젝트 루트/chroma_store 에 적재.
+    # 절대경로로 고정하여 실행 디렉토리(CWD)와 무관하게 동작.
+    # Docker: CHROMA_PERSIST_PATH=/workspace/chroma_store 를 주입.
+    chroma_persist_path: str = os.getenv(
+        "CHROMA_PERSIST_PATH", str(_PROJECT_ROOT / "chroma_store")
+    )
 
     # enriched JSON 위치 — POST /vector/index (비상 재적재 용도) 에서만 사용
     # 팀원 enrich_flattened_for_rag.py 출력 디렉토리와 동일

@@ -26,6 +26,7 @@ anyio[trio]==4.9.0   # pytest-anyio 비동기 테스트 지원 (현재 동기 �
 PyJWT==2.10.1
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.12
+google-auth>=2.29.0
 
 # ── Environment & Utils ───────────────────────────────────────────────────────
 python-dotenv==1.0.1
