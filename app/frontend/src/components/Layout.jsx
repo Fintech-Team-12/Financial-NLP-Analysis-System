@@ -16,7 +16,7 @@ const Layout = ({ children, user, onLogout, currentChatId, setCurrentChatId }) =
   const fetchChats = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
-    
+
     try {
       const res = await axios.get(`${API_BASE_URL}/chats`, {
         headers: { Authorization: `Bearer ${token}` }
@@ -29,7 +29,7 @@ const Layout = ({ children, user, onLogout, currentChatId, setCurrentChatId }) =
 
   useEffect(() => {
     fetchChats();
-  }, [currentChatId]); 
+  }, [currentChatId]);
 
   const handleNewChat = () => {
     setCurrentChatId(null);
@@ -59,7 +59,7 @@ const Layout = ({ children, user, onLogout, currentChatId, setCurrentChatId }) =
   };
 
   const handleDeleteChat = async (id) => {
-    if(!window.confirm("정말 이 채팅방을 삭제하시겠습니까?")) return;
+    if (!window.confirm("정말 이 채팅방을 삭제하시겠습니까?")) return;
     const token = localStorage.getItem('token');
     try {
       await axios.delete(`${API_BASE_URL}/chats/${id}`, {
@@ -98,8 +98,8 @@ const Layout = ({ children, user, onLogout, currentChatId, setCurrentChatId }) =
               <li key={chat.id} className={`chat-item-wrapper ${currentChatId === chat.id ? 'active' : ''}`}>
                 {editingChatId === chat.id ? (
                   <div className="chat-edit-wrapper">
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
                       onKeyDown={(e) => {
@@ -109,12 +109,12 @@ const Layout = ({ children, user, onLogout, currentChatId, setCurrentChatId }) =
                       autoFocus
                       className="chat-edit-input"
                     />
-                    <button onClick={() => submitRename(chat.id)} className="chat-action-btn"><Check size={14}/></button>
-                    <button onClick={() => setEditingChatId(null)} className="chat-action-btn"><X size={14}/></button>
+                    <button onClick={() => submitRename(chat.id)} className="chat-action-btn"><Check size={14} /></button>
+                    <button onClick={() => setEditingChatId(null)} className="chat-action-btn"><X size={14} /></button>
                   </div>
                 ) : (
                   <>
-                    <button 
+                    <button
                       className="history-btn"
                       onClick={() => handleSelectChat(chat.id)}
                     >
@@ -122,8 +122,8 @@ const Layout = ({ children, user, onLogout, currentChatId, setCurrentChatId }) =
                       <span className="chat-truncate">{chat.title}</span>
                     </button>
                     <div className="chat-hover-actions">
-                      <button onClick={(e) => { e.stopPropagation(); handleRenameClick(chat); }} className="chat-action-btn"><Pencil size={14}/></button>
-                      <button onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }} className="chat-action-btn"><Trash2 size={14}/></button>
+                      <button onClick={(e) => { e.stopPropagation(); handleRenameClick(chat); }} className="chat-action-btn"><Pencil size={14} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }} className="chat-action-btn"><Trash2 size={14} /></button>
                     </div>
                   </>
                 )}

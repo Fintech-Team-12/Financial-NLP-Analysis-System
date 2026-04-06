@@ -51,6 +51,16 @@ def _rag_output_to_response(
     )
 
 
+@router.post("/ask", response_model=ChatResponse, include_in_schema=False)
+def ask_legacy(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ChatResponse:
+    """하위호환 alias — /chat 과 동일."""
+    return ask(req, db, current_user)
+
+
 @router.post("/chat", response_model=ChatResponse)
 def ask(
     req: ChatRequest,

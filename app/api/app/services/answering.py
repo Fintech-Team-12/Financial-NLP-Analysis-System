@@ -2,10 +2,22 @@
 답변 생성(Answering) 레이어.
 
 GeneratorBase    : 공통 인터페이스
-MockGenerator    : 검색 문서를 포맷팅해서 반환 (LLM 없이 동작, 기본/폴백)
-ExternalGenerator: llm_service.generate_answer() 를 호출하는 어댑터.
-                   llm_service.py 배치 + USE_EXTERNAL_LLM=true 로 활성화.
+MockGenerator    : 검색 문서를 포맷팅해서 반환 (LLM 없이 동작, 테스트/폴백용)
+ClaudeGenerator  : Anthropic Claude API 기반 실제 답변 생성
+                   - ANTHROPIC_API_KEY 설정 시 자동 활성화
+                   - 미설정 시 MockGenerator 로 폴백
+
+## 환경변수
+  ANTHROPIC_API_KEY  Anthropic API 키 (설정 시 ClaudeGenerator 활성)
+  CLAUDE_MODEL       사용할 모델 (기본: claude-sonnet-4-6)
+  MOCK_MODE=true     항상 MockGenerator 사용 (테스트용)
+
+## 주의
+  현재 chat.py 는 run_rag() 단일 경로를 사용하므로 이 파일의 generator 는
+  직접 호출되지 않는다. 기존 retrieval 경로 또는 테스트에서 사용.
 """
+from __future__ import annotations
+
 import logging
 from abc import ABC, abstractmethod
 
@@ -15,9 +27,16 @@ from app.services.router import QuestionType
 
 _log = logging.getLogger(__name__)
 
+# anthropic SDK는 선택적 의존성 — 미설치 시 ClaudeGenerator 비활성화
+try:
+    import anthropic as _anthropic_sdk
+    _ANTHROPIC_AVAILABLE = True
+except ImportError:
+    _ANTHROPIC_AVAILABLE = False
+
 
 class GeneratorBase(ABC):
-    """답변 생성 인터페이스. LLM 담당자가 이 클래스를 상속해 구현."""
+    """답변 생성 인터페이스."""
 
     @abstractmethod
     def generate(
@@ -29,11 +48,10 @@ class GeneratorBase(ABC):
         ...
 
 
+# ── MockGenerator ─────────────────────────────────────────────────────────────
+
 class MockGenerator(GeneratorBase):
-    """
-    LLM 없이 검색된 문서를 포맷팅해 반환.
-    로컬 개발 및 CI 에서 사용. Ollama 없이도 전체 파이프라인 검증 가능.
-    """
+    """LLM 없이 검색된 문서를 포맷팅해 반환. 로컬 개발, CI, 폴백용."""
 
     def generate(
         self,
@@ -87,43 +105,43 @@ class MockGenerator(GeneratorBase):
         return "\n\n---\n\n".join(doc.content[:300] for doc in docs[:3])
 
 
-# ── ExternalGenerator ─────────────────────────────────────────────────────────
+# ── ClaudeGenerator ───────────────────────────────────────────────────────────
 
-def _to_llm_service_format(doc: NormalizedDocument) -> dict:
-    """NormalizedDocument → llm_service.generate_answer() 가 기대하는 dict 형식 변환."""
-    return {
-        "document": doc.content,
-        "retrieval_source": "vector_search",
-        "collection_type": doc.doc_type,
-        "metadata": {
-            "section_title": doc.section,
-            "section_path": doc.parent_section or "",
-            "year": doc.year,
-            "content_type": doc.doc_type,
-            "report_type": doc.doc_type,
-        },
-    }
+_SYSTEM_PROMPT = """\
+당신은 삼성전자 감사보고서 전문 QA 어시스턴트입니다.
+사용자의 질문에 대해 아래 제공된 감사보고서 문서 컨텍스트만을 근거로 답변하세요.
+
+규칙:
+1. 컨텍스트에 없는 내용은 추측하지 마세요.
+2. 금액은 정확히 인용하고 단위(원, 백만원 등)를 명시하세요.
+3. 출처 섹션명을 답변 내에 자연스럽게 포함하세요.
+4. 한국어로 명확하고 간결하게 답변하세요.
+5. 컨텍스트가 충분하지 않으면 "제공된 문서에서 해당 정보를 찾을 수 없습니다."라고 답하세요.\
+"""
 
 
-class ExternalGenerator(GeneratorBase):
+def _build_context(docs: list[NormalizedDocument], question_type: QuestionType) -> str:
+    parts: list[str] = []
+    for i, doc in enumerate(docs, 1):
+        header = f"[문서 {i}] {doc.year}년 {doc.section} ({doc.doc_type})"
+        body = doc.content
+        if doc.numeric_value and question_type == QuestionType.NUMERIC:
+            vals = ", ".join(f"{k}: {v:,}원" for k, v in doc.numeric_value.items())
+            body = f"{body}\n금액: {vals}"
+        parts.append(f"{header}\n{body}")
+    return "\n\n".join(parts)
+
+
+class ClaudeGenerator(GeneratorBase):
     """
-    llm_service.generate_answer() 를 호출하는 어댑터.
-
-    활성화: USE_EXTERNAL_LLM=true 환경변수 설정
-    llm_service.py 가 없으면 MockGenerator 로 자동 폴백.
+    Anthropic Claude API 기반 답변 생성기.
+    API 오류 시 MockGenerator 로 폴백.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6") -> None:
+        self._client = _anthropic_sdk.Anthropic(api_key=api_key)
+        self._model = model
         self._fallback = MockGenerator()
-        self._llm_generate = self._load_llm_service()
-
-    def _load_llm_service(self):
-        try:
-            from app.services.llm_service import generate_answer  # type: ignore[import]
-            return generate_answer
-        except ImportError:
-            _log.warning("llm_service.py 를 찾을 수 없습니다. MockGenerator 로 폴백합니다.")
-            return None
 
     def generate(
         self,
@@ -131,9 +149,6 @@ class ExternalGenerator(GeneratorBase):
         docs: list[NormalizedDocument],
         question_type: QuestionType,
     ) -> ChatResponse:
-        if self._llm_generate is None:
-            return self._fallback.generate(question, docs, question_type)
-
         if not docs:
             return ChatResponse(
                 answer="관련 문서를 찾을 수 없습니다.",
@@ -142,15 +157,19 @@ class ExternalGenerator(GeneratorBase):
                 used_documents=[],
             )
 
-        raw_results = [_to_llm_service_format(doc) for doc in docs]
+        context = _build_context(docs, question_type)
+        user_message = f"## 컨텍스트\n\n{context}\n\n## 질문\n\n{question}"
 
         try:
-            llm_output = self._llm_generate(question, raw_results)
-            answer: str = llm_output.get("answer", "")
-            if not answer:
-                raise ValueError("llm_service 에서 빈 answer 반환")
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=1024,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_message}],
+            )
+            answer: str = response.content[0].text
         except Exception as exc:
-            _log.warning("ExternalGenerator 실패 (%s), MockGenerator 로 폴백", exc)
+            _log.warning("ClaudeGenerator 실패 (%s), MockGenerator 로 폴백", exc)
             return self._fallback.generate(question, docs, question_type)
 
         citations = [
@@ -172,22 +191,26 @@ class ExternalGenerator(GeneratorBase):
         )
 
 
+# ── Factory ───────────────────────────────────────────────────────────────────
+
 def get_generator() -> GeneratorBase:
     """
-    환경변수에 따라 Generator 구현체 선택.
+    환경에 따라 Generator 구현체 선택.
 
     우선순위:
-      1. MOCK_MODE=true        → MockGenerator  (테스트/CI)
-      2. USE_EXTERNAL_LLM=true → ExternalGenerator (llm_service 사용)
-      3. 그 외                 → MockGenerator  (기본값)
+      1. MOCK_MODE=true          → MockGenerator (테스트/개발용)
+      2. ANTHROPIC_API_KEY 설정  → ClaudeGenerator (실제 답변 생성)
+      3. 그 외                   → MockGenerator (폴백)
     """
-    import os
     from app.core.config import settings
 
     if settings.mock_mode:
         return MockGenerator()
 
-    if os.getenv("USE_EXTERNAL_LLM", "false").lower() == "true":
-        return ExternalGenerator()
+    if _ANTHROPIC_AVAILABLE and settings.anthropic_api_key:
+        return ClaudeGenerator(settings.anthropic_api_key, settings.claude_model)
 
+    _log.warning(
+        "ANTHROPIC_API_KEY 미설정 또는 anthropic 패키지 미설치. MockGenerator 사용."
+    )
     return MockGenerator()
