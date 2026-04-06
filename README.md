@@ -7,38 +7,8 @@ HTM 원본 파싱 → 구조화 JSON → ChromaDB 벡터 인덱싱 → LLM 답�
 
 ## 실행 방법
 
-### 1. 환경변수 설정
 
-```bash
-cp app/api/.env.example app/api/.env
-```
-
-`app/api/.env` 를 열어 최소 두 가지 입력:
-
-```
-ANTHROPIC_API_KEY=sk-ant-...          # Claude 사용 시 (없으면 Mock 폴백)
-JWT_SECRET_KEY=<openssl rand -hex 32> # 필수
-```
-
----
-
-### 2a. Docker Compose (전체 스택)
-
-```bash
-docker compose up --build
-```
-
-| 서비스 | 주소 |
-|---|---|
-| Frontend | http://localhost:8501 |
-| API | http://localhost:8000 |
-| API 문서 | http://localhost:8000/docs |
-
-Ollama를 로컬에서 실행 중이면 `http://host.docker.internal:11434` 로 자동 연결된다.
-
----
-
-### 2b. 로컬 개발 — API 서버
+### 1. 로컬 개발 — API 서버
 
 ```bash
 pip install -r requirements.txt   # Python 3.11
@@ -50,33 +20,104 @@ uvicorn app.main:app --reload --port 8000
 
 ---
 
-### 2c. 로컬 개발 — Frontend
+### 2. 로컬 개발 — Frontend
 
 ```bash
 cd app/frontend
-npm ci
+npm install .
 npm run dev   # http://localhost:5173
 ```
 
-Google 로그인이 필요하면 `app/frontend/.env` 파일을 직접 만들어 아래 한 줄 추가:
 
-```
-VITE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-```
 
-없어도 앱은 실행된다 (Google 로그인 비활성화 상태로 동작).
+./ ⇒ 프로젝트 root라고 가정
 
----
+- ./env 파일
+    
+    ```bash
+    APP_ENV=dev
+    CHROMA_HOST=chroma
+    CHROMA_PORT=8000
+    OLLAMA_BASE_URL=http://host.docker.internal:11434
+    SQLITE_PATH=/workspace/data/processed/finance.db
+    ```
+    
+- ./app/api/.env 파일
+    
+    ```bash
+    ANTHROPIC_API_KEY=키 받아서 입력하세요
+    GOOGLE_CLIENT_ID=키 받아서 입력하세요.apps.googleusercontent.com
+    JWT_SECRET_KEY=my_super_secret_jwt_key
+    MOCK_MODE=falseANONYMOUS_TELEMETRY=False
+    ```
+    
+- ./app/frontend/.env 파일
+    
+    ```bash
+    VITE_GOOGLE_CLIENT_ID=키 받아서 입력하세요.apps.googleusercontent.com
+    ```
+    
+- .gitignore 파일
+    
+    ```bash
+    # Environment
+    .env
+    .venv
+    .venv_api
+    .venv_ingest
+    venv/
+    env/
+    .agent
+    
+    # OS / Editor
+    .DS_Store
+    
+    # Python
+    __pycache__/
+    *.py[cod]
+    *$py.class
+    *.so
+    .pytest_cache/
+    .ruff_cache
+    .coverage
+    .coverage.*
+    
+    # Database
+    *.db
+    *.sqlite3
+    example_finance.db
+    
+    # Backend / app data
+    app/api/app/data
+    uploaded_files/
+    
+    # Chroma / generated data
+    chroma/flattened_data/
+    chroma_store/
+    chroma_db/
+    data/processed/
+    chroma/data_process/enriched_data/
+    chroma/data_process/flattened_data/
+    chroma/data_process/sqlite_by_year/
+    
+    # Frontend
+    node_modules/
+    dist/
+    dist-ssr/
+    .vite
+    *.local
+    data/processed/
+    
+    .coverage
+    .coverage.*
+    .pytest_cache
+    .ruff_cache
+    .venv
+    .venv_api
+    .venv_ingest
+    .agent
+    ```
 
-### Mock 모드 (LLM · ChromaDB 없이 테스트)
-
-```bash
-# app/api/.env 에 추가
-MOCK_MODE=true
-LLM_MODE=mock
-
-pytest app/api/tests -v
-```
 
 ---
 
