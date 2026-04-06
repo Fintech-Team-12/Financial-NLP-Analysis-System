@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { Send, Bot, User } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import './ChatPage.css';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -10,6 +12,7 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [chatTitle, setChatTitle] = useState('New Chatting');
+  const [selectedModel, setSelectedModel] = useState('claude-4.6-sonnet');
 
   const messagesEndRef = useRef(null);
 
@@ -67,6 +70,7 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
     try {
       const payload = {
         question: userMessageContent,
+        model: selectedModel,
       };
 
       if (currentChatId) {
@@ -117,6 +121,25 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
           <h2>{chatTitle}</h2>
           <span className="badge">JWT Active</span>
         </div>
+        <div className="header-actions">
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            style={{
+              padding: '6px 10px',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)',
+              outline: 'none',
+              cursor: 'pointer',
+              fontSize: '0.85rem'
+            }}
+          >
+            <option value="claude-4.6-sonnet">Claude Sonnet 4.6</option>
+            {/* 향후 Ollama/DeepSeek 모델 등 추가 시 파싱 구문이나 렌더링은 동일하게 호환됩니다 */}
+          </select>
+        </div>
       </header>
 
       <div className="messages-container">
@@ -126,7 +149,15 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
               {msg.role === 'assistant' ? <Bot size={20} /> : <User size={20} />}
             </div>
             <div className={`message-bubble ${msg.isError ? 'error' : ''}`}>
-              {msg.content}
+              {msg.role === 'assistant' ? (
+                <div className="markdown-body">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {msg.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                msg.content
+              )}
             </div>
           </div>
         ))}

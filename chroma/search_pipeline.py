@@ -89,9 +89,9 @@ def build_search_plan(user_query: str) -> dict[str, Any]:
         "metadata_filter": metadata_filter,
         "section_title_hint": hints["section_title_hint"],
         "top_section_hint": hints["top_section_hint"],
-        "general_k": 12,
-        "hint_k": 8,
-        "top_k": 5,
+        "general_k": 200,
+        "hint_k": 100,
+        "top_k": 50,
         "use_reranker": False,
     }
 
