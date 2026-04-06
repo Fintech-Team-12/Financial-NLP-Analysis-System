@@ -32,6 +32,14 @@ chroma_db/
 
 data/processed/
 
+# Frontend
+node_modules/
+dist/
+dist-ssr/
+.vite
+*.local
+data/processed/
+
 
 
 .coverage
