@@ -89,12 +89,16 @@ def clean_amount(val):
     val_str = str(val).strip()
     if val_str == "-" or val_str == "":
         return 0
-    val_str = val_str.replace(",", "")
-    if val_str.startswith("(") and val_str.endswith(")"):
-        val_str = "-" + val_str[1:-1]
+    
+    # 🚀 숫자로 바꿀 때만 쓸 임시 변수(temp_str)를 만들어서 쉼표를 지웁니다.
+    temp_str = val_str.replace(",", "")
+    if temp_str.startswith("(") and temp_str.endswith(")"):
+        temp_str = "-" + temp_str[1:-1]
+        
     try:
-        return int(float(val_str))
+        return int(float(temp_str))
     except ValueError:
+        # 숫자로 바꾸기 실패하면 쉼표가 멀쩡히 살아있는 '원본(val_str)'을 반환합니다!
         return val_str
 
 
@@ -140,8 +144,9 @@ def html_table_to_dict(table_tag, columns):
         if text == '-':
             return '0'
         
-        # 💥 내용연수 특수 기호(띄어쓰기, 쉼표, 하이픈) 모두 '~'로 완벽 복구
-        text = re.sub(r'(?<!\d)(\d{1,2})[\s,~-]+(\d{1,2})\s*년', r'\1~\2년', text)
+    # 💥 내용연수 기호 보존 로직 (쉼표는 '각각', 물결표는 '범위'를 의미하므로 구분하여 복구)
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*(,)\s*(\d{1,2})\s*년', r'\1, \3년', text)
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*([~-])\s*(\d{1,2})\s*년', r'\1~\3년', text)
         
         return text
 
@@ -285,10 +290,12 @@ def html_table_to_dict_notes(table_tag):
         if text == '-':
             return '0'
         
-        # 💥 내용연수 특수 기호(띄어쓰기, 쉼표, 하이픈) 모두 '~'로 완벽 복구
-        text = re.sub(r'(?<!\d)(\d{1,2})[\s,~-]+(\d{1,2})\s*년', r'\1~\2년', text)
+        # 💥 내용연수 특수기호 완벽 분리 로직 (순서 중요!)
+        # 1. 물결(~)이나 하이픈(-)이 명확히 있으면 '범위'로 인정
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*[~-]\s*(\d{1,2})\s*년', r'\1~\2년', text)
         
-        text = re.sub(r'\(\s*-?(\d+(?:,\d{3})*(?:\.\d+)?)\s*(%?)\s*\)', r'-\1\2', text)
+        # 2. 쉼표(,), 가운뎃점(·), 슬래시(/) 또는 단순 띄어쓰기로 띄워져 있으면 '각각'으로 간주하여 쉼표로 통일
+        text = re.sub(r'(?<!\d)(\d{1,2})\s*[,·/\s]+\s*(\d{1,2})\s*년', r'\1, \2년', text)
         return re.sub(r'(?<!\d)-?\d+(?:,\d{3})*(?:\.\d+)?(?!\d)', lambda m: m.group(0).replace(',', ''), text)
 
     df_cleaned = df.map(clean_cell_notes) if hasattr(df, 'map') else df.applymap(clean_cell_notes)
