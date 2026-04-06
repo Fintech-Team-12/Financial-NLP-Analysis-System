@@ -4,6 +4,27 @@
 """
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+import sys
+
+# config.py 위치: {project_root}/app/api/app/core/config.py
+# parents[4]    = {project_root}
+# 실행 디렉토리(CWD)에 무관하게 프로젝트 루트 기준 절대경로를 계산한다.
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
+
+# .env 파일을 app/api/.env 에서 명시적으로 로드
+_API_ENV = _PROJECT_ROOT / "app" / "api" / ".env"
+_env_loaded = load_dotenv(_API_ENV, override=True)
+print(f"[config] .env loaded={_env_loaded}, path={_API_ENV}, exists={_API_ENV.exists()}")
+print(f"[config] ANTHROPIC_API_KEY={'SET' if os.getenv('ANTHROPIC_API_KEY') else 'NOT SET'}")
+print(f"[config] MOCK_MODE={os.getenv('MOCK_MODE', 'not set')}")
+
+# ── 모듈 탐색 경로 정규화 ──────────────────────────────────────────────────
+# 프로젝트 루트를 sys.path 상단에 추가하여 app.ingest 등 상위 패키지 접근 가능하게 함
+
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 
 class Settings:
@@ -11,7 +32,10 @@ class Settings:
     _project_root: Path = Path(__file__).resolve().parents[4]
 
     # ── 데이터 경로 ────────────────────────────────────────────────────────────
-    data_dir: str = os.getenv("DATA_DIR", str(_project_root / "data" / "processed"))
+    # 기본값을 config.py 위치 기준 절대경로로 고정하여 CWD 에 무관하게 동작.
+    # Docker: DATA_DIR 환경변수로 /workspace/data/processed 를 주입하면 됨.
+    # 테스트: conftest.py 에서 settings.data_dir 을 임시 경로로 덮어씀.
+    data_dir: str = os.getenv("DATA_DIR", str(_PROJECT_ROOT / "data" / "processed"))
 
     # 업로드된 HTML 파일 임시 저장 경로
     upload_temp_dir: str = os.getenv("UPLOAD_TEMP_DIR", str(_project_root / "data" / "uploads_temp"))
@@ -20,20 +44,22 @@ class Settings:
     processed_dir: str = os.getenv("PROCESSED_DIR", str(_project_root / "data" / "processed"))
 
     # ── 동작 모드 ─────────────────────────────────────────────────────────────
-    # True  → MockRetriever + MockGenerator (Chroma/Ollama 불필요)
-    # False → ChromaRetriever + OllamaGenerator (담당자 구현 후 교체)
-    mock_mode: bool = os.getenv("MOCK_MODE", "true").lower() == "true"
+    # True  → MockRetriever + MockGenerator (Chroma 불필요)
+    # False → ChromaRetriever + ClaudeGenerator (기본값)
+    mock_mode: bool = os.getenv("MOCK_MODE", "false").lower() == "true"
 
-    # ── ChromaDB — PersistentClient 경로 (현재 사용) ──────────────────────────
-    # 팀원 chroma/load_*.py 가 "./chroma_store" 에 적재.
-    # 백엔드는 동일 경로를 읽기 전용으로 사용하는 것이 원칙.
-    # Docker: WORKDIR=/workspace → /workspace/chroma_store
-    chroma_persist_path: str = os.getenv("CHROMA_PERSIST_PATH", "chroma_store")
+    # ── ChromaDB — PersistentClient 경로 ──────────────────────────────────────
+    # 기본값을 프로젝트 루트 기준 절대경로로 고정.
+    # app/api 디렉토리에서 실행해도 프로젝트 루트의 chroma_store 를 읽는다.
+    # Docker: CHROMA_PERSIST_PATH=/workspace/chroma_store 를 주입.
+    chroma_persist_path: str = os.getenv(
+        "CHROMA_PERSIST_PATH", str(_PROJECT_ROOT / "chroma_store")
+    )
 
     # enriched JSON 위치 — POST /vector/index (비상 재적재 용도) 에서만 사용
     # 팀원 enrich_flattened_for_rag.py 출력 디렉토리와 동일
     chroma_enriched_data_dir: str = os.getenv(
-        "CHROMA_ENRICHED_DATA_DIR", "chroma/enriched_data"
+        "CHROMA_ENRICHED_DATA_DIR", str(_PROJECT_ROOT / "chroma" / "data_process" / "enriched_data")
     )
 
     # ── ChromaDB — HTTP 클라이언트 (미래 확장, 현재 미사용) ─────────────────
@@ -47,6 +73,13 @@ class Settings:
     # docker-compose.yml: OLLAMA_BASE_URL=http://host.docker.internal:11434
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "llama3")
+
+    # ── Anthropic Claude API ─────────────────────────────────────────────────
+    # ANTHROPIC_API_KEY 설정 시 ClaudeGenerator 활성화.
+    # 미설정 시 MockGenerator 폴백.
+    # 모델 기본값: claude-sonnet-4-6 (한국어 금융 QA 최적)
+    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
+    claude_model: str = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
 
     # ── 사용자/채팅 이력용 SQLite (RAG 벡터 데이터와 분리) ────────────────────
     # Docker: /workspace/data/app.db (data 볼륨에 마운트)

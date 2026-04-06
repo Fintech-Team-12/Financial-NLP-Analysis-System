@@ -127,20 +127,20 @@ class TestVectorHealthIntegration:
 class TestVectorSearchIntegration:
     def test_status_code(self, real_client):
         resp = real_client.post(
-            "/api/vector/search", json={"query": "감사의견", "year": 2014}
+            "/vector/search", json={"query": "감사의견", "year": 2014}
         )
         assert resp.status_code == 200
 
     def test_returns_results(self, real_client):
         data = real_client.post(
-            "/api/vector/search", json={"query": "감사의견", "year": 2014}
+            "/vector/search", json={"query": "감사의견", "year": 2014}
         ).json()
         assert data["count"] > 0, "결과가 0건입니다."
         assert len(data["results"]) > 0
 
     def test_no_warnings_for_indexed_year(self, real_client):
         data = real_client.post(
-            "/api/vector/search", json={"query": "감사의견", "year": 2014}
+            "/vector/search", json={"query": "감사의견", "year": 2014}
         ).json()
         assert data["warnings"] == [], (
             f"인덱싱된 연도에서 warnings 가 발생했습니다: {data['warnings']}"
@@ -149,7 +149,7 @@ class TestVectorSearchIntegration:
     def test_result_fields(self, real_client):
         """검색 결과 1건에 필수 필드가 모두 포함되어야 한다."""
         data = real_client.post(
-            "/api/vector/search", json={"query": "감사의견", "year": 2014}
+            "/vector/search", json={"query": "감사의견", "year": 2014}
         ).json()
         first = data["results"][0]
         for field in ("id", "document", "metadata", "distance", "collection"):
@@ -157,14 +157,14 @@ class TestVectorSearchIntegration:
 
     def test_result_id_is_nonempty_string(self, real_client):
         data = real_client.post(
-            "/api/vector/search", json={"query": "감사의견", "year": 2014}
+            "/vector/search", json={"query": "감사의견", "year": 2014}
         ).json()
         first_id = data["results"][0]["id"]
         assert isinstance(first_id, str) and first_id, "id 가 비어 있습니다"
 
     def test_result_metadata_has_year(self, real_client):
         data = real_client.post(
-            "/api/vector/search", json={"query": "감사의견", "year": 2014}
+            "/vector/search", json={"query": "감사의견", "year": 2014}
         ).json()
         meta = data["results"][0]["metadata"]
         assert "year" in meta, "metadata 에 year 필드가 없습니다"
@@ -172,7 +172,7 @@ class TestVectorSearchIntegration:
 
     def test_result_metadata_has_section_title(self, real_client):
         data = real_client.post(
-            "/api/vector/search", json={"query": "감사의견", "year": 2014}
+            "/vector/search", json={"query": "감사의견", "year": 2014}
         ).json()
         meta = data["results"][0]["metadata"]
         assert "section_title" in meta
@@ -180,13 +180,13 @@ class TestVectorSearchIntegration:
     def test_result_collection_name(self, real_client):
         """결과 컬렉션명이 10년치 통합 컬렉션 중 하나여야 한다."""
         data = real_client.post(
-            "/api/vector/search", json={"query": "감사의견", "year": 2014}
+            "/vector/search", json={"query": "감사의견", "year": 2014}
         ).json()
         assert data["results"][0]["collection"] in (_COLLECTION_TEXT, _COLLECTION_TABLE)
 
     def test_result_document_is_nonempty(self, real_client):
         data = real_client.post(
-            "/api/vector/search", json={"query": "감사의견", "year": 2014}
+            "/vector/search", json={"query": "감사의견", "year": 2014}
         ).json()
         doc = data["results"][0]["document"]
         assert isinstance(doc, str) and len(doc) > 0
@@ -194,21 +194,21 @@ class TestVectorSearchIntegration:
     def test_result_document_contains_samsung(self, real_client):
         """embedding_text 는 항상 회사명 '삼성전자' 를 포함한다."""
         data = real_client.post(
-            "/api/vector/search", json={"query": "감사의견", "year": 2014}
+            "/vector/search", json={"query": "감사의견", "year": 2014}
         ).json()
         assert "삼성전자" in data["results"][0]["document"]
 
     def test_results_sorted_by_distance(self, real_client):
         """결과가 distance 오름차순 (가까운 것이 먼저) 으로 정렬되어야 한다."""
         data = real_client.post(
-            "/api/vector/search", json={"query": "감사의견", "year": 2014, "top_k": 5}
+            "/vector/search", json={"query": "감사의견", "year": 2014, "top_k": 5}
         ).json()
         distances = [r["distance"] for r in data["results"] if r["distance"] is not None]
         assert distances == sorted(distances), f"결과가 distance 오름차순이 아닙니다: {distances}"
 
     def test_top_k_respected(self, real_client):
         data = real_client.post(
-            "/api/vector/search", json={"query": "재무제표", "year": 2014, "top_k": 3}
+            "/vector/search", json={"query": "재무제표", "year": 2014, "top_k": 3}
         ).json()
         assert len(data["results"]) <= 3
 
