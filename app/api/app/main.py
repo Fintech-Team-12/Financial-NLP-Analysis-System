@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.routing import APIRouter
 
 from app.routes import health, ingest, auth, chats, upload
 from app.routes import chat as chat_qa  # qa.py → chat.py 로 리네임
@@ -94,7 +95,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── 라우터 등록 (원본 상태로 완전 복구) ──────────────────────────────────────────────────
+# ── 라우터 등록 ───────────────────────────────────────────────────────────────
 
 app.include_router(health.router, tags=["system"])
 
@@ -105,9 +106,11 @@ try:
 except ImportError:
     pass  # chromadb 미설치 환경에서는 스킵
 
-# Frontend 연동용 API 엔드포인트
-app.include_router(ingest.router, tags=["ingest"])
-app.include_router(chat_qa.router, prefix="/api", tags=["chat"])
-app.include_router(auth.router, prefix="/api", tags=["auth"])
-app.include_router(chats.router, prefix="/api", tags=["chats"])
-app.include_router(upload.router, prefix="/api", tags=["upload"])
+# Frontend 연동용 API — 모두 /api 프리픽스로 통일
+api_router = APIRouter(prefix="/api")
+api_router.include_router(ingest.router, tags=["ingest"])
+api_router.include_router(chat_qa.router, tags=["chat"])
+api_router.include_router(auth.router, tags=["auth"])
+api_router.include_router(chats.router, tags=["chats"])
+api_router.include_router(upload.router, tags=["upload"])
+app.include_router(api_router)

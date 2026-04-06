@@ -1,23 +1,64 @@
-"""POST /chat — 감사보고서 기반 질의응답."""
+"""POST /chat — 감사보고서 기반 질의응답.
+
+파이프라인: run_rag() (chroma.search_pipeline + llm_service) 단일 경로.
+DB 저장 / JWT 인증 / ChatResponse 스키마는 그대로 유지.
+"""
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.schemas.request import ChatRequest
-from app.schemas.response import ChatResponse
-from app.services import indexing, chat_history_service
-from app.services.answering import get_generator
-from app.services.retrieval import get_retriever
-from app.services.router import QuestionType, classify_question
+from app.schemas.response import Citation, ChatResponse
+from app.services import chat_history_service
+from app.services.rag_service import run_rag
+from app.services.router import classify_question
 from app.core.auth_deps import get_current_user, get_db
 from app.db.models import User
 
+_log = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _rag_output_to_response(
+    rag_out: dict,
+    question_type_str: str,
+    chat_id: int | None,
+) -> ChatResponse:
+    """run_rag() 반환값 → ChatResponse 변환."""
+    llm = rag_out.get("llm_output", {})
+    results = rag_out.get("results", [])
+
+    answer = llm.get("answer", "")
+    if not answer:
+        answer = "답변을 생성할 수 없습니다."
+
+    citations = [
+        Citation(
+            doc_id=r.get("id", ""),
+            year=int((r.get("metadata") or {}).get("year", 0)),
+            section=(r.get("metadata") or {}).get("section_title", ""),
+            excerpt=(r.get("document") or "")[:200],
+        )
+        for r in results[:5]
+    ]
+
+    return ChatResponse(
+        answer=answer,
+        citations=citations,
+        question_type=question_type_str,
+        used_documents=[r.get("id", "") for r in results],
+        chat_id=chat_id,
+    )
+
+
 @router.post("/ask", response_model=ChatResponse, include_in_schema=False)
-def ask_legacy(req: ChatRequest) -> ChatResponse:
-    """프론트엔드 하위호환 alias — /chat과 동일."""
-    return ask(req)
+def ask_legacy(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ChatResponse:
+    """하위호환 alias — /chat 과 동일."""
+    return ask(req, db, current_user)
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -27,97 +68,44 @@ def ask(
     current_user: User = Depends(get_current_user)
 ) -> ChatResponse:
     """
-    질문 유형을 분류한 뒤 각 전략으로 문서를 검색하고 답변을 생성한다.
-    생성 과정 중 사용자와 AI의 메시지는 DB에 저장된다.
+    rag_service.run_rag() → llm_service.generate_answer() 단일 경로.
+    세션 생성 / 소유권 검증 / 메시지 DB 저장 / JWT 인증은 그대로 유지.
     """
-    # 1. 채팅 세션 확보 및 질문 저장
+    # ── 1. 채팅 세션 확보 및 질문 저장 ───────────────────────────────────────
     chat_id = req.chat_id
     if not chat_id:
         title = req.question[:30] + "..." if len(req.question) > 30 else req.question
         new_session = chat_history_service.create_chat_session(db, current_user.id, title=title)
         chat_id = new_session.id
-    
-    # 세션 소유권 검증
+
     session_obj = chat_history_service.get_session_by_id(db, chat_id)
     if not session_obj or session_obj.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="해당 채팅방에 접근 권한이 없습니다.")
 
     chat_history_service.add_message(db, chat_id, "user", req.question)
-    # MockRetriever(mock_mode=True) 는 in-memory 인덱스에 의존하므로 비었으면 차단.
-    # ChromaRetriever(mock_mode=False) 는 ChromaDB 가 자체적으로 동작하므로
-    # in-memory 가 비어 있어도 차단하지 않는다 (parsing 브랜치 파일명 변경 대응).
-    from app.core.config import settings as _cfg
-    if _cfg.mock_mode and not indexing.get_document_count():
-        fallback_answer = (
-            "현재 인덱싱된 감사보고서 문서가 없습니다. "
-            "data/processed/ 경로에 JSON 데이터를 추가하거나 "
-            "POST /reports/ingest 를 호출하여 문서를 먼저 적재해 주세요."
-        )
-        chat_history_service.add_message(db, chat_id, "assistant", fallback_answer)
+
+    # ── 2. question_type 분류 (응답 메타데이터용) ─────────────────────────────
+    routing = classify_question(req.question, default_year=req.year)
+
+    # ── 3. RAG 파이프라인 실행 ────────────────────────────────────────────────
+    try:
+        rag_out = run_rag(req.question)
+    except Exception as exc:
+        _log.error("run_rag() 실패: %s", exc)
+        error_answer = "검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+        chat_history_service.add_message(db, chat_id, "assistant", error_answer)
         db.commit()
         return ChatResponse(
-            answer=fallback_answer,
+            answer=error_answer,
             citations=[],
-            question_type="descriptive",
+            question_type=routing.question_type.value,
             used_documents=[],
             chat_id=chat_id,
         )
 
-    routing = classify_question(req.question, default_year=req.year)
-    year = routing.extracted_year or req.year
-    retriever = get_retriever()
-    generator = get_generator()
-
-    if routing.question_type == QuestionType.NUMERIC:
-        docs = _handle_numeric(routing.extracted_item, year, req.question, req.top_k, retriever)
-    elif routing.question_type == QuestionType.NOTE_LINKED:
-        docs = _handle_note_linked(routing.extracted_item, year, req.question, req.top_k, retriever)
-    else:
-        docs = _handle_descriptive(req.question, year, req.top_k, retriever)
-
-    # 답변 생성
-    response = generator.generate(req.question, docs, routing.question_type)
-    
-    # 2. 답변 저장 및 response 객체 조립
+    # ── 4. 응답 변환 및 DB 저장 ───────────────────────────────────────────────
+    response = _rag_output_to_response(rag_out, routing.question_type.value, chat_id)
     chat_history_service.add_message(db, chat_id, "assistant", response.answer)
-    response.chat_id = chat_id
     db.commit()
 
     return response
-
-
-# ── 유형별 검색 전략 ──────────────────────────────────────────────────────────
-
-def _handle_numeric(item, year, question, top_k, retriever):
-    """structured_lookup 우선 → 없으면 retrieval fallback."""
-    if item and year:
-        doc = indexing.structured_lookup(year, item)
-        if doc:
-            return [doc]
-    return retriever.search(question, year=year, doc_type="financial_statement", top_k=top_k)
-
-
-def _handle_note_linked(item, year, question, top_k, retriever):
-    """재무제표 관련주석 번호 → 주석 섹션 우선 검색 → fallback."""
-    docs = []
-    if item and year:
-        fs_doc = indexing.structured_lookup(year, item)
-        if fs_doc and fs_doc.related_notes:
-            docs = retriever.search_by_note_ids(fs_doc.related_notes, year)
-    if not docs:
-        docs = retriever.search(question, year=year, doc_type="note", top_k=top_k)
-    return docs[:top_k]
-
-
-def _handle_descriptive(question, year, top_k, retriever):
-    """감사보고서 텍스트 검색.
-
-    임베딩 기반 검색에서 질문 문장 전체보다 핵심 키워드가
-    더 정확한 유사도를 산출한다.
-    연도 접두사("2023년 ")와 문말 어미/물음표를 제거한 뒤 검색한다.
-    """
-    import re
-    # "2023년 감사의견은?" → "감사의견"
-    query = re.sub(r"20\d{2}년\s*", "", question).strip()
-    query = re.sub(r"[은는이가을를]?\s*\??$", "", query).strip() or question
-    return retriever.search(query, year=year, top_k=top_k)

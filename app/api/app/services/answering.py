@@ -1,16 +1,20 @@
 """
 답변 생성(Answering) 레이어.
 
-GeneratorBase : 공통 인터페이스
-MockGenerator : 검색 문서를 포맷팅해서 반환 (LLM 없이 동작, 테스트/폴백용)
-ClaudeGenerator: Anthropic Claude API 기반 실제 답변 생성
-  - ANTHROPIC_API_KEY 설정 시 자동 활성화
-  - 미설정 시 MockGenerator 로 폴백
+GeneratorBase    : 공통 인터페이스
+MockGenerator    : 검색 문서를 포맷팅해서 반환 (LLM 없이 동작, 테스트/폴백용)
+ClaudeGenerator  : Anthropic Claude API 기반 실제 답변 생성
+                   - ANTHROPIC_API_KEY 설정 시 자동 활성화
+                   - 미설정 시 MockGenerator 로 폴백
 
 ## 환경변수
   ANTHROPIC_API_KEY  Anthropic API 키 (설정 시 ClaudeGenerator 활성)
   CLAUDE_MODEL       사용할 모델 (기본: claude-sonnet-4-6)
   MOCK_MODE=true     항상 MockGenerator 사용 (테스트용)
+
+## 주의
+  현재 chat.py 는 run_rag() 단일 경로를 사용하므로 이 파일의 generator 는
+  직접 호출되지 않는다. 기존 retrieval 경로 또는 테스트에서 사용.
 """
 from __future__ import annotations
 
@@ -32,7 +36,7 @@ except ImportError:
 
 
 class GeneratorBase(ABC):
-    """답변 생성 인터페이스. LLM 담당자가 이 클래스를 상속해 구현."""
+    """답변 생성 인터페이스."""
 
     @abstractmethod
     def generate(
@@ -47,10 +51,7 @@ class GeneratorBase(ABC):
 # ── MockGenerator ─────────────────────────────────────────────────────────────
 
 class MockGenerator(GeneratorBase):
-    """
-    LLM 없이 검색된 문서를 포맷팅해 반환.
-    로컬 개발, CI, ANTHROPIC_API_KEY 미설정 시 폴백.
-    """
+    """LLM 없이 검색된 문서를 포맷팅해 반환. 로컬 개발, CI, 폴백용."""
 
     def generate(
         self,
@@ -120,7 +121,6 @@ _SYSTEM_PROMPT = """\
 
 
 def _build_context(docs: list[NormalizedDocument], question_type: QuestionType) -> str:
-    """검색된 문서를 LLM 컨텍스트 텍스트로 변환."""
     parts: list[str] = []
     for i, doc in enumerate(docs, 1):
         header = f"[문서 {i}] {doc.year}년 {doc.section} ({doc.doc_type})"
@@ -135,12 +135,7 @@ def _build_context(docs: list[NormalizedDocument], question_type: QuestionType) 
 class ClaudeGenerator(GeneratorBase):
     """
     Anthropic Claude API 기반 답변 생성기.
-
-    ANTHROPIC_API_KEY 가 설정되어 있어야 한다.
-    모델: config.claude_model (기본 claude-sonnet-4-6).
-
-    API 오류 / 타임아웃 시 MockGenerator 로 폴백하여
-    서비스가 완전히 중단되지 않도록 한다.
+    API 오류 시 MockGenerator 로 폴백.
     """
 
     def __init__(self, api_key: str, model: str = "claude-sonnet-4-6") -> None:
@@ -174,9 +169,7 @@ class ClaudeGenerator(GeneratorBase):
             )
             answer: str = response.content[0].text
         except Exception as exc:
-            _log.warning(
-                "ClaudeGenerator API call failed (%s), falling back to MockGenerator", exc
-            )
+            _log.warning("ClaudeGenerator 실패 (%s), MockGenerator 로 폴백", exc)
             return self._fallback.generate(question, docs, question_type)
 
         citations = [
@@ -208,14 +201,8 @@ def get_generator() -> GeneratorBase:
       1. MOCK_MODE=true          → MockGenerator (테스트/개발용)
       2. ANTHROPIC_API_KEY 설정  → ClaudeGenerator (실제 답변 생성)
       3. 그 외                   → MockGenerator (폴백)
-
-    ClaudeGenerator 활성화 방법:
-      export ANTHROPIC_API_KEY="sk-ant-..."
-      (또는 .env 파일에 추가 후 서버 재시작)
     """
     from app.core.config import settings
-
-    print(f"[answering] mock_mode={settings.mock_mode}, _ANTHROPIC_AVAILABLE={_ANTHROPIC_AVAILABLE}, api_key={'SET' if settings.anthropic_api_key else 'EMPTY'}")
 
     if settings.mock_mode:
         return MockGenerator()
@@ -224,7 +211,6 @@ def get_generator() -> GeneratorBase:
         return ClaudeGenerator(settings.anthropic_api_key, settings.claude_model)
 
     _log.warning(
-        "ANTHROPIC_API_KEY not set or anthropic package not installed. "
-        "Using MockGenerator. Set ANTHROPIC_API_KEY to enable real answer generation."
+        "ANTHROPIC_API_KEY 미설정 또는 anthropic 패키지 미설치. MockGenerator 사용."
     )
     return MockGenerator()
