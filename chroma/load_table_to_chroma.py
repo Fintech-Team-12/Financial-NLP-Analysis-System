@@ -95,7 +95,7 @@ print("찾은 DB 파일:")
 for db_file in db_files:
     print("-", db_file.name)
 
-client = chromadb.PersistentClient(path=CHROMA_PATH)
+client = chromadb.PersistentClient(path=str(CHROMA_PATH))
 
 try:
     client.delete_collection(name=COLLECTION_NAME)
