@@ -5,18 +5,25 @@ from chromadb.utils import embedding_functions
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# 2. 이미지상 sqlite_by_year가 data_process 폴더 안에 있으므로 아래와 같이 설정
+# -----------------------------------------
+# SQLite DB 경로와 Chroma 저장 경로 설정
+# -----------------------------------------
 SQLITE_DIR = BASE_DIR / "data_process" / "sqlite_by_year"
-CHROMA_PATH = BASE_DIR / "chroma_store" # chroma 폴더 안에 생성하고 싶다면
+CHROMA_PATH = BASE_DIR / "chroma_store"
 
 print(f"🔍 실제 탐색 경로: {SQLITE_DIR.resolve()}")
 COLLECTION_NAME = "audit_reports_10years_table_minilm"
 
-#배치 사이즈 조정
+# -----------------------------------------
+# 배치 크기와 문서 길이 제한 설정
+# -----------------------------------------
 BATCH_SIZE = 50
-MAX_TEXT_LENGTH = 2000   # 필요하면 3000까지 늘려도 됨
+MAX_TEXT_LENGTH = 2000
 
 
+# -----------------------------------------
+# Chroma metadata에 들어갈 값을 안전하게 변환
+# -----------------------------------------
 def safe_metadata_value(value):
     if value is None:
         return ""
@@ -25,6 +32,9 @@ def safe_metadata_value(value):
     return str(value)
 
 
+# -----------------------------------------
+# SQLite row에서 필요한 metadata만 추출
+# -----------------------------------------
 def build_metadata(row):
     return {
         "chunk_id": safe_metadata_value(row["chunk_id"]),
@@ -43,6 +53,10 @@ def build_metadata(row):
     }
 
 
+# -----------------------------------------
+# SQLite DB에서 embedding 대상 row 조회
+# table 데이터 중 embedding_text가 있는 row만 가져옴
+# -----------------------------------------
 def fetch_rows_from_db(db_path):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -75,12 +89,17 @@ def fetch_rows_from_db(db_path):
     return rows
 
 
+# -----------------------------------------
+# 리스트를 batch_size 단위로 나누어 순회
+# -----------------------------------------
 def batch_iter(items, batch_size):
     for i in range(0, len(items), batch_size):
         yield items[i:i + batch_size]
 
 
-# 10년치만 넣고 싶으면 2014~2023으로 제한
+# -----------------------------------------
+# 적재 대상 연도 DB 파일만 선택
+# -----------------------------------------
 TARGET_YEARS = set(range(2014, 2025))
 
 db_files = [
@@ -95,7 +114,11 @@ print("찾은 DB 파일:")
 for db_file in db_files:
     print("-", db_file.name)
 
-client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+# -----------------------------------------
+# Chroma client 연결 및 컬렉션 초기화
+# 기존 컬렉션이 있으면 삭제 후 새로 생성
+# -----------------------------------------
+client = chromadb.PersistentClient(path=CHROMA_PATH)
 
 try:
     client.delete_collection(name=COLLECTION_NAME)
@@ -103,6 +126,10 @@ try:
 except Exception:
     print("삭제할 기존 컬렉션 없음")
 
+
+# -----------------------------------------
+# 임베딩 함수 설정 및 컬렉션 생성
+# -----------------------------------------
 embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
     model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
     device="mps"
@@ -115,6 +142,10 @@ collection = client.get_or_create_collection(
 
 total_added = 0
 
+# -----------------------------------------
+# 각 연도별 DB를 읽어 Chroma에 적재
+# text 길이를 제한한 뒤 metadata와 함께 batch 단위로 add 수행
+# -----------------------------------------
 for db_path in db_files:
     print(f"\n처리 중: {db_path.name}")
     rows = fetch_rows_from_db(db_path)
@@ -148,6 +179,9 @@ for db_path in db_files:
     total_added += len(ids)
     print(f"{db_path.name} 적재 완료: {len(ids)}개")
 
+# -----------------------------------------
+# 전체 적재 결과 출력
+# -----------------------------------------
 print("\n=== 전체 적재 완료 ===")
 print("총 적재 문서 수:", total_added)
 print("컬렉션 count():", collection.count())
