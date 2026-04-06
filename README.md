@@ -77,3 +77,11 @@ perf	성능 개선에 대한 커밋<br>
    ├─ ingest    ---HTTP---> chroma:8000
    └─ api       ---HTTP---> host.docker.internal:11434
 ```
+
+
+# 테스트 실행
+ruff check app/api/app app/api/tests
+ruff check app/ingest/src app/ingest/tests
+
+pytest app/api/tests --cov=app/api/app --cov-report=term-missing
+python -m pytest app/ingest/tests --cov=app/ingest/src --cov-report=term-missing

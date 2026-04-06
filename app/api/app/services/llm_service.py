@@ -58,21 +58,34 @@ def format_contexts(results: list[dict[str, Any]], max_contexts: int = MAX_CONTE
     return "\n".join(lines)
 
 
-def build_answer_prompt(question: str, results: list[dict[str, Any]]) -> str:
+def build_answer_prompt(question: str, results: list[dict[str, Any]], chat_history: list[dict] | None = None) -> str:
     context_block = format_contexts(results)
+
+    history_text = ""
+    if chat_history:
+        history_text = "[이전 대화 기록]\n"
+        for msg in chat_history:
+            role = "사용자" if msg["role"] == "user" else "시스템"
+            content = msg["content"][:300] + ("..." if len(msg["content"]) > 300 else "")
+            history_text += f"- {role}: {content}\n"
+        history_text += "\n"
 
     return f"""
 당신은 감사보고서 질의응답 보조 시스템입니다.
 
 아래 검색 문맥만을 근거로 사용자 질문에 답변하세요.
-문맥에 없는 내용을 단정해서 지어내지 마세요.
+검색 문맥에 포함된 정보만 사용하고, 문맥에 없는 내용을 추측하여 덧붙이지 마세요.
 답변은 한국어로 작성하세요.
 가능하면 핵심 답변을 먼저 짧게 제시하고,
 이후 근거가 되는 section_title 또는 section_path를 함께 요약하세요.
-표/수치 질문이라면 수치를 우선적으로 정리하세요.
-문맥이 불충분하면 "검색 결과만으로는 확실히 확인되지 않습니다."라고 말하세요.
+표나 수치에 대한 질문이라면 관련 수치를 우선적으로 정리하세요.
 
-[사용자 질문]
+질문에 직접적으로 대응하는 근거가 검색 문맥에 없는 경우에만
+"검색 결과만으로는 확실히 확인되지 않습니다."라고 답하세요.
+단, 검색 문맥에 질문과 관련된 정보가 일부라도 있으면,
+확인 가능한 범위까지만 답변하고 부족한 부분만 한정적으로 설명하세요.
+
+{history_text}[사용자 질문]
 {question}
 
 [검색 문맥]
@@ -85,7 +98,7 @@ def build_answer_prompt(question: str, results: list[dict[str, Any]]) -> str:
 """.strip()
 
 
-def generate_mock_answer(question: str, results: list[dict[str, Any]]) -> dict[str, Any]:
+def generate_mock_answer(question: str, results: list[dict[str, Any]], chat_history: list[dict] | None = None) -> dict[str, Any]:
     """
     실제 LLM 호출 전, 파이프라인 확인용 mock 응답
     """
@@ -192,13 +205,16 @@ def generate_answer(
 
     model 인자는 해당 provider 안에서 사용할 모델명 오버라이드.
     """
-    prompt = build_answer_prompt(question, results)
+    # LLM_MODE=mock → 강제 mock / 미설정 → API 키 유무로 자동 판단
+    llm_mode = os.getenv("LLM_MODE", "").lower()
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
 
-    # ── 1. 환경변수 mock 강제 ──────────────────────────────────────────────
+    prompt = build_answer_prompt(question, results, chat_history=chat_history)
+
     if os.getenv("LLM_MODE", "").lower() == "mock":
-        resp = generate_mock_answer(question, results)
-        resp["prompt_preview"] = truncate_text(prompt, 1000)
-        return resp
+        response = generate_mock_answer(question, results, chat_history=chat_history)
+        response["prompt_preview"] = truncate_text(prompt, 1000)
+        return response
 
     # ── 2. mock provider ───────────────────────────────────────────────────
     if provider == "mock":
@@ -218,10 +234,10 @@ def generate_answer(
                 "model_name": f"ollama/{effective_model}",
             }
         except Exception as exc:
-            _log.warning("Ollama 호출 실패 (%s), mock으로 폴백", exc)
-            resp = generate_mock_answer(question, results)
-            resp["model_name"] = f"mock-llm (ollama/{effective_model} fallback)"
-            return resp
+            _log.warning("Claude API 호출 실패 (%s), mock으로 폴백", exc)
+            response = generate_mock_answer(question, results, chat_history=chat_history)
+            response["model_name"] = "mock-llm (claude fallback)"
+            return response
 
     # ── 4. Claude (명시 또는 API 키 있을 때 기본값) ────────────────────────
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
@@ -237,9 +253,9 @@ def generate_answer(
             }
         except Exception as exc:
             _log.warning("Claude 호출 실패 (%s), mock으로 폴백", exc)
-            resp = generate_mock_answer(question, results)
-            resp["model_name"] = "mock-llm (claude fallback)"
-            return resp
+    response = generate_mock_answer(question, results, chat_history=chat_history)
+    response["prompt_preview"] = truncate_text(prompt, 1000)
+    return response
 
     # ── 5. 키 없음 → mock 폴백 ────────────────────────────────────────────
     _log.warning("사용 가능한 LLM 없음 (provider=%s), mock 응답 사용", provider)

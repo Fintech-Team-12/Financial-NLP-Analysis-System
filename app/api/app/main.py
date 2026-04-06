@@ -1,4 +1,7 @@
 """FastAPI 애플리케이션 진입점."""
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -11,11 +14,8 @@ _project_root = Path(__file__).resolve().parents[3]
 if str(_project_root) not in sys.path:
     sys.path.append(str(_project_root))
 
-from pydantic import BaseModel
-from chroma.search_pipeline import build_search_plan
-
-from app.routes import health, ingest, auth, chats, upload, files as files_router
-from app.routes import chat as chat_qa  # qa.py → chat.py 로 리네임
+from app.routes import health, ingest, auth, chats, upload, files as files_router  # noqa: E402
+from app.routes import chat as chat_qa  # noqa: E402
 
 
 @asynccontextmanager

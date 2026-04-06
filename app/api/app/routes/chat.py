@@ -82,6 +82,9 @@ def ask(
     if not session_obj or session_obj.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="해당 채팅방에 접근 권한이 없습니다.")
 
+    past_messages = chat_history_service.list_session_messages(db, chat_id)
+    chat_history = [{"role": m.role, "content": m.content} for m in past_messages]
+
     chat_history_service.add_message(db, chat_id, "user", req.question)
 
     # ── 2. question_type 분류 (응답 메타데이터용) ─────────────────────────────
