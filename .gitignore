@@ -32,3 +32,9 @@ chroma_store/
 chroma_db/
 
 data/processed/
+
+.coverage
+.coverage.*
+.pytest_cache
+.ruff_cache
+.venv
