@@ -349,3 +349,160 @@ def search(
         key=lambda x: x["distance"] if x["distance"] is not None else float("inf")
     )
     return {"results": results[:top_k], "warnings": warnings}
+
+
+# ── upload 경로 전용: NormalizedDocument → ChromaDB upsert ───────────────────
+
+# NormalizedDocument.doc_type → ChromaDB top_section 메타데이터 매핑
+_DOC_TYPE_TO_TOP_SECTION: dict[str, str] = {
+    "audit_report": "감사보고서",
+    "financial_statement": "재무상태표",
+    "note": "주석",
+    "other": "",
+}
+
+
+def index_normalized_documents(
+    docs: list,  # list[NormalizedDocument]
+    force: bool = False,
+) -> dict[str, Any]:
+    """
+    NormalizedDocument 리스트를 text ChromaDB 컬렉션에 upsert.
+
+    upload 완료 후 background/chroma_indexer.py 에서 호출한다.
+    기존 팀원 스크립트(load_text_to_chroma.py)와 동일한 컬렉션을 공유하되
+    doc_id 형식이 다르므로 (팀 스크립트: UUID, 여기: 사람이 읽을 수 있는 키)
+    force=True 시 동일 doc_id 만 삭제 후 재추가한다.
+
+    Args:
+        docs: indexing.get_documents_by_year() 결과
+        force: True 이면 동일 doc_id 기존 항목 삭제 후 재추가
+
+    Returns:
+        {"collection": str, "indexed": int, "total": int}
+    """
+    if not docs:
+        return {"indexed": 0, "collection": _COLLECTION_TEXT, "total": 0}
+
+    client = _get_client()
+    ef = _get_embedding_function()
+    collection = client.get_or_create_collection(
+        name=_COLLECTION_TEXT,
+        embedding_function=ef,
+    )
+
+    if force:
+        ids_to_check = [doc.doc_id for doc in docs]
+        try:
+            existing = collection.get(ids=ids_to_check, include=[])
+            if existing["ids"]:
+                collection.delete(ids=existing["ids"])
+        except Exception:
+            pass  # 존재하지 않는 ID 삭제 시도는 무시
+
+    ids: list[str] = []
+    documents: list[str] = []
+    metadatas: list[dict[str, Any]] = []
+
+    for i, doc in enumerate(docs):
+        ids.append(doc.doc_id)
+        documents.append(doc.content)
+        metadatas.append({
+            "year": doc.year,
+            "company": doc.company or "삼성전자",
+            "report_type": "감사보고서",
+            "top_section": _DOC_TYPE_TO_TOP_SECTION.get(doc.doc_type, ""),
+            "note_number": doc.section if doc.doc_type == "note" else "",
+            "section_path": doc.parent_section or "",
+            "section_level": 1,
+            "section_title": doc.section or "",
+            "section_type": doc.doc_type,
+            "content_type": "text",
+            "order_index": i,
+        })
+
+    for i in range(0, len(ids), _BATCH_SIZE):
+        collection.add(
+            ids=ids[i : i + _BATCH_SIZE],
+            documents=documents[i : i + _BATCH_SIZE],
+            metadatas=metadatas[i : i + _BATCH_SIZE],
+        )
+
+    return {
+        "collection": _COLLECTION_TEXT,
+        "indexed": len(ids),
+        "total": collection.count(),
+    }
+
+
+def index_uploaded_table_chunks(
+    chunks: list[dict],
+    force: bool = False,
+) -> dict[str, Any]:
+    """
+    enriched table chunk 리스트를 table ChromaDB 컬렉션에 upsert.
+
+    upload 완료 후 background/chroma_indexer.py 에서 호출한다.
+    팀원 load_table_to_chroma.py 와 동일한 컬렉션·메타데이터 스키마를 사용한다.
+
+    Args:
+        chunks: indexing.load_table_chunks_from_file() 의 반환값
+                (content_type="table" 인 enriched 레코드)
+        force:  True 이면 동일 chunk_id 기존 항목 삭제 후 재추가
+
+    Returns:
+        {"collection": str, "indexed": int, "total": int}
+    """
+    if not chunks:
+        return {"indexed": 0, "collection": _COLLECTION_TABLE, "total": 0}
+
+    client = _get_client()
+    ef = _get_embedding_function()
+    collection = client.get_or_create_collection(
+        name=_COLLECTION_TABLE,
+        embedding_function=ef,
+    )
+
+    if force:
+        ids_to_check = [c["chunk_id"] for c in chunks]
+        try:
+            existing = collection.get(ids=ids_to_check, include=[])
+            if existing["ids"]:
+                collection.delete(ids=existing["ids"])
+        except Exception:
+            pass
+
+    ids: list[str] = [c["chunk_id"] for c in chunks]
+    # load_table_to_chroma.py 와 동일하게 2000자 truncation 적용
+    documents: list[str] = [str(c.get("embedding_text", ""))[:2000] for c in chunks]
+    metadatas: list[dict[str, Any]] = [
+        {
+            "chunk_id":     str(c.get("chunk_id", "")),
+            "doc_id":       str(c.get("doc_id", "")),
+            "year":         int(c.get("year", 0)),
+            "company":      str(c.get("company", "")),
+            "report_type":  str(c.get("report_type", "")),
+            "top_section":  str(c.get("top_section", "")),
+            "note_number":  str(c.get("note_number", "") or ""),
+            "section_path": str(c.get("section_path", "")),
+            "section_level":int(c.get("section_level", 0)),
+            "section_title":str(c.get("section_title", "")),
+            "section_type": str(c.get("section_type", "table")),
+            "content_type": "table",
+            "order_index":  int(c.get("order_index", 0)),
+        }
+        for c in chunks
+    ]
+
+    for i in range(0, len(ids), _BATCH_SIZE):
+        collection.add(
+            ids=ids[i : i + _BATCH_SIZE],
+            documents=documents[i : i + _BATCH_SIZE],
+            metadatas=metadatas[i : i + _BATCH_SIZE],
+        )
+
+    return {
+        "collection": _COLLECTION_TABLE,
+        "indexed": len(ids),
+        "total": collection.count(),
+    }
