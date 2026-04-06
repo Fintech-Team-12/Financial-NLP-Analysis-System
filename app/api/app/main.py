@@ -1,4 +1,7 @@
 """FastAPI 애플리케이션 진입점."""
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

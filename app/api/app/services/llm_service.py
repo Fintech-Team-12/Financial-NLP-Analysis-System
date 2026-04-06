@@ -56,8 +56,18 @@ def format_contexts(results: list[dict[str, Any]], max_contexts: int = MAX_CONTE
     return "\n".join(lines)
 
 
-def build_answer_prompt(question: str, results: list[dict[str, Any]]) -> str:
+def build_answer_prompt(question: str, results: list[dict[str, Any]], chat_history: list[dict] | None = None) -> str:
     context_block = format_contexts(results)
+
+    history_block = ""
+    if chat_history:
+        lines = []
+        # 토큰 절약을 위해 최근 6개(3턴) 정도만 유지
+        for msg in chat_history[-6:]:
+            role_name = "사용자" if msg.get("role") == "user" else "어시스턴트"
+            lines.append(f"{role_name}: {msg.get('content', '')}")
+        if lines:
+            history_block = "[이전 대화 기록]\n" + "\n".join(lines) + "\n\n"
 
     return f"""
 당신은 감사보고서 질의응답 보조 시스템입니다.
@@ -70,11 +80,11 @@ def build_answer_prompt(question: str, results: list[dict[str, Any]]) -> str:
 표/수치 질문이라면 수치를 우선적으로 정리하세요.
 문맥이 불충분하면 "검색 결과만으로는 확실히 확인되지 않습니다."라고 말하세요.
 
+{history_block}[검색 문맥]
+{context_block}
+
 [사용자 질문]
 {question}
-
-[검색 문맥]
-{context_block}
 
 [출력 형식]
 1. 답변
@@ -83,7 +93,7 @@ def build_answer_prompt(question: str, results: list[dict[str, Any]]) -> str:
 """.strip()
 
 
-def generate_mock_answer(question: str, results: list[dict[str, Any]]) -> dict[str, Any]:
+def generate_mock_answer(question: str, results: list[dict[str, Any]], chat_history: list[dict] | None = None) -> dict[str, Any]:
     """
     실제 LLM 호출 전, 파이프라인 확인용 mock 응답
     """
@@ -144,7 +154,7 @@ def _call_claude(prompt: str) -> str:
     return resp.content[0].text
 
 
-def generate_answer(question: str, results: list[dict[str, Any]]) -> dict[str, Any]:
+def generate_answer(question: str, results: list[dict[str, Any]], chat_history: list[dict] | None = None) -> dict[str, Any]:
     """
     retrieval 결과 → 최종 답변 생성.
 
@@ -157,11 +167,11 @@ def generate_answer(question: str, results: list[dict[str, Any]]) -> dict[str, A
     llm_mode = os.getenv("LLM_MODE", "").lower()
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
 
-    prompt = build_answer_prompt(question, results)
+    prompt = build_answer_prompt(question, results, chat_history=chat_history)
 
     # ── mock 강제 모드 ──────────────────────────────────────────────────────
     if llm_mode == "mock":
-        response = generate_mock_answer(question, results)
+        response = generate_mock_answer(question, results, chat_history=chat_history)
         response["prompt_preview"] = truncate_text(prompt, 1000)
         return response
 
@@ -184,13 +194,13 @@ def generate_answer(question: str, results: list[dict[str, Any]]) -> dict[str, A
             }
         except Exception as exc:
             _log.warning("Claude API 호출 실패 (%s), mock으로 폴백", exc)
-            response = generate_mock_answer(question, results)
+            response = generate_mock_answer(question, results, chat_history=chat_history)
             response["model_name"] = "mock-llm (claude fallback)"
             return response
 
     # ── API 키 없음 → mock 폴백 ─────────────────────────────────────────────
     _log.warning("ANTHROPIC_API_KEY 미설정, mock 응답 사용")
-    response = generate_mock_answer(question, results)
+    response = generate_mock_answer(question, results, chat_history=chat_history)
     response["prompt_preview"] = truncate_text(prompt, 1000)
     return response
 

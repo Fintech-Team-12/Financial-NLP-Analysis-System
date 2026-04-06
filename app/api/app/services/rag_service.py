@@ -19,17 +19,17 @@ try:
 except ImportError:
     from app.api.app.services.llm_service import generate_answer
     
-def run_rag(question: str) -> dict[str, Any]:
+def run_rag(question: str, chat_history: list[dict] | None = None) -> dict[str, Any]:
     """
     질문을 받아
     1) retrieval/search pipeline 수행
-    2) retrieval 결과를 바탕으로 answer 생성
+    2) retrieval 결과를 바탕으로 answer 생성 (chat_history 참조 포함)
     3) 최종 응답 dict 반환
     """
     search_output = run_search(question)
     results = search_output.get("results", [])
 
-    llm_output = generate_answer(question, results)
+    llm_output = generate_answer(question, results, chat_history=chat_history)
 
     return {
         "question": question,

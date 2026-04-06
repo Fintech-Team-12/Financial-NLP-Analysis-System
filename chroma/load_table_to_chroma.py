@@ -106,7 +106,7 @@ TARGET_YEARS = set(range(2014, 2025))
 
 db_files = [
     p for p in sorted(SQLITE_DIR.glob("audit_reports_*.db"))
-    if any(f"audit_reports_{year}" in p.name for year in TARGET_YEARS)
+    if any(p.name.startswith(f"audit_reports_{year}_") for year in TARGET_YEARS)
 ]
 
 if not db_files:
