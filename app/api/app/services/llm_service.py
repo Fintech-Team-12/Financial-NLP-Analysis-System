@@ -4,6 +4,8 @@ import logging
 import os
 from typing import Any
 
+import httpx
+
 _log = logging.getLogger(__name__)
 
 try:
@@ -127,14 +129,13 @@ def generate_mock_answer(question: str, results: list[dict[str, Any]]) -> dict[s
     }
 
 
-def _call_claude(prompt: str) -> str:
+def _call_claude(prompt: str, model: str | None = None) -> str:
     """
     Anthropic Claude API 호출.
-    ANTHROPIC_API_KEY / CLAUDE_MODEL 환경변수 사용.
-    실패 시 예외를 그대로 올린다 (호출자가 폴백 처리).
+    model 미지정 시 CLAUDE_MODEL 환경변수 또는 기본값 사용.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+    model = model or os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
     client = _anthropic_sdk.Anthropic(api_key=api_key)
     resp = client.messages.create(
         model=model,
@@ -144,55 +145,107 @@ def _call_claude(prompt: str) -> str:
     return resp.content[0].text
 
 
-def generate_answer(question: str, results: list[dict[str, Any]]) -> dict[str, Any]:
+def _call_ollama(prompt: str, model: str | None = None) -> str:
+    """
+    Ollama API 호출 (POST /api/generate).
+    OLLAMA_BASE_URL / OLLAMA_MODEL 환경변수 사용.
+    model 인자로 런타임 오버라이드 가능.
+    """
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    model = model or os.getenv("OLLAMA_MODEL", "llama3")
+
+    resp = httpx.post(
+        f"{base_url}/api/generate",
+        json={"model": model, "prompt": prompt, "stream": False},
+        timeout=120,
+    )
+    resp.raise_for_status()
+    return resp.json()["response"]
+
+
+def _build_evidence(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "section_title": (item.get("metadata") or {}).get("section_title", ""),
+            "year": (item.get("metadata") or {}).get("year", ""),
+        }
+        for item in results[:MAX_CONTEXTS]
+    ]
+
+
+def generate_answer(
+    question: str,
+    results: list[dict[str, Any]],
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
     """
     retrieval 결과 → 최종 답변 생성.
 
-    우선순위:
-      1. LLM_MODE=mock          → 항상 mock (테스트/개발용)
-      2. ANTHROPIC_API_KEY 설정 → Claude API 실제 호출
-      3. 그 외                  → mock 폴백
-    """
-    # LLM_MODE=mock → 강제 mock / 미설정 → API 키 유무로 자동 판단
-    llm_mode = os.getenv("LLM_MODE", "").lower()
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    provider 우선순위:
+      1. LLM_MODE=mock env       → 항상 mock (테스트/개발용)
+      2. provider='mock'         → mock
+      3. provider='ollama'       → Ollama (OLLAMA_BASE_URL 서버)
+      4. provider='claude'       → Claude Sonnet API
+      5. provider 미지정         → ANTHROPIC_API_KEY 있으면 claude, 없으면 mock
 
+    model 인자는 해당 provider 안에서 사용할 모델명 오버라이드.
+    """
     prompt = build_answer_prompt(question, results)
 
-    # ── mock 강제 모드 ──────────────────────────────────────────────────────
-    if llm_mode == "mock":
-        response = generate_mock_answer(question, results)
-        response["prompt_preview"] = truncate_text(prompt, 1000)
-        return response
+    # ── 1. 환경변수 mock 강제 ──────────────────────────────────────────────
+    if os.getenv("LLM_MODE", "").lower() == "mock":
+        resp = generate_mock_answer(question, results)
+        resp["prompt_preview"] = truncate_text(prompt, 1000)
+        return resp
 
-    # ── Claude API 실제 호출 ────────────────────────────────────────────────
-    if _ANTHROPIC_AVAILABLE and api_key:
+    # ── 2. mock provider ───────────────────────────────────────────────────
+    if provider == "mock":
+        resp = generate_mock_answer(question, results)
+        resp["prompt_preview"] = truncate_text(prompt, 1000)
+        return resp
+
+    # ── 3. Ollama ──────────────────────────────────────────────────────────
+    if provider == "ollama":
+        effective_model = model or os.getenv("OLLAMA_MODEL", "llama3")
         try:
-            model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
-            answer = _call_claude(prompt)
+            answer = _call_ollama(prompt, model=effective_model)
             return {
                 "answer": answer,
-                "evidence_summary": [
-                    {
-                        "section_title": (item.get("metadata") or {}).get("section_title", ""),
-                        "year": (item.get("metadata") or {}).get("year", ""),
-                    }
-                    for item in results[:MAX_CONTEXTS]
-                ],
+                "evidence_summary": _build_evidence(results),
                 "used_context_count": min(len(results), MAX_CONTEXTS),
-                "model_name": model,
+                "model_name": f"ollama/{effective_model}",
             }
         except Exception as exc:
-            _log.warning("Claude API 호출 실패 (%s), mock으로 폴백", exc)
-            response = generate_mock_answer(question, results)
-            response["model_name"] = "mock-llm (claude fallback)"
-            return response
+            _log.warning("Ollama 호출 실패 (%s), mock으로 폴백", exc)
+            resp = generate_mock_answer(question, results)
+            resp["model_name"] = f"mock-llm (ollama/{effective_model} fallback)"
+            return resp
 
-    # ── API 키 없음 → mock 폴백 ─────────────────────────────────────────────
-    _log.warning("ANTHROPIC_API_KEY 미설정, mock 응답 사용")
-    response = generate_mock_answer(question, results)
-    response["prompt_preview"] = truncate_text(prompt, 1000)
-    return response
+    # ── 4. Claude (명시 또는 API 키 있을 때 기본값) ────────────────────────
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if provider == "claude" or (provider is None and _ANTHROPIC_AVAILABLE and api_key):
+        effective_model = model or os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
+        try:
+            answer = _call_claude(prompt, model=effective_model)
+            return {
+                "answer": answer,
+                "evidence_summary": _build_evidence(results),
+                "used_context_count": min(len(results), MAX_CONTEXTS),
+                "model_name": f"claude/{effective_model}",
+            }
+        except Exception as exc:
+            _log.warning("Claude 호출 실패 (%s), mock으로 폴백", exc)
+            resp = generate_mock_answer(question, results)
+            resp["model_name"] = "mock-llm (claude fallback)"
+            return resp
+
+    # ── 5. 키 없음 → mock 폴백 ────────────────────────────────────────────
+    _log.warning("사용 가능한 LLM 없음 (provider=%s), mock 응답 사용", provider)
+    resp = generate_mock_answer(question, results)
+    resp["prompt_preview"] = truncate_text(prompt, 1000)
+    return resp
 
 
 if __name__ == "__main__":

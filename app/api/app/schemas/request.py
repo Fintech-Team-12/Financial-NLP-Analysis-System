@@ -10,7 +10,16 @@ class ChatRequest(BaseModel):
     top_k: int = Field(5, ge=1, le=20, description="검색 결과 수")
     chat_id: Optional[int] = Field(None, description="기존 대화 세션 ID (없으면 새 대화)")
 
-    model_config = {"json_schema_extra": {"example": {"question": "2023년 매출채권 금액은?", "year": 2023}}}
+    # LLM 선택 — 미지정 시 서버 기본값(환경변수) 사용
+    provider: Optional[str] = Field(None, description="'ollama' | 'claude' | 'mock'")
+    model: Optional[str] = Field(None, description="모델명 (Ollama: 'llama3', Claude: 'claude-sonnet-4-6' 등)")
+
+    model_config = {"json_schema_extra": {"example": {
+        "question": "2023년 매출채권 금액은?",
+        "year": 2023,
+        "provider": "ollama",
+        "model": "llama3",
+    }}}
 
 
 class IngestRequest(BaseModel):

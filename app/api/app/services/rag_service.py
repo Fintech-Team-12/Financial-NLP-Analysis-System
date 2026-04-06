@@ -19,17 +19,25 @@ try:
 except ImportError:
     from app.api.app.services.llm_service import generate_answer
     
-def run_rag(question: str) -> dict[str, Any]:
+def run_rag(
+    question: str,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
     """
     질문을 받아
     1) retrieval/search pipeline 수행
     2) retrieval 결과를 바탕으로 answer 생성
     3) 최종 응답 dict 반환
+
+    provider: 'ollama' | 'claude' | 'mock' | None (None이면 환경변수 기준 자동 선택)
+    model: 해당 provider에서 사용할 모델명 (None이면 환경변수 기본값)
     """
     search_output = run_search(question)
     results = search_output.get("results", [])
 
-    llm_output = generate_answer(question, results)
+    llm_output = generate_answer(question, results, provider=provider, model=model)
 
     return {
         "question": question,
