@@ -35,7 +35,17 @@ def run_rag(
     provider: 'ollama' | 'claude' | 'mock' | None (None이면 환경변수 기준 자동 선택)
     model: 해당 provider에서 사용할 모델명 (None이면 환경변수 기본값)
     """
-    search_output = run_search(question)
+    # 멀티턴 대응 (Query Augmentation Heuristic)
+    # 현재 질문에 핵심 키워드가 없고 짧은 경우, 대화 문맥(이전 질문)을 검색어에 합칩니다.
+    search_query = question
+    if chat_history and len(question) < 40:
+        financial_keywords = ["20", "재무", "손익", "주석", "자본", "현금", "감사", "삼성", "엘지", "LG", "카카오", "네이버"]
+        if not any(k in question for k in financial_keywords):
+            last_user_msg = next((m["content"] for m in reversed(chat_history) if m["role"] == "user"), None)
+            if last_user_msg:
+                search_query = f"{last_user_msg} {question}"
+
+    search_output = run_search(search_query)
     results = search_output.get("results", [])
 
     llm_output = generate_answer(question, results, provider=provider, model=model, chat_history=chat_history)

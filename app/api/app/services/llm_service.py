@@ -170,7 +170,7 @@ def _call_ollama(prompt: str, model: str | None = None) -> str:
     resp = httpx.post(
         f"{base_url}/api/generate",
         json={"model": model, "prompt": prompt, "stream": False},
-        timeout=120,
+        timeout=300.0,
     )
     resp.raise_for_status()
     return resp.json()["response"]

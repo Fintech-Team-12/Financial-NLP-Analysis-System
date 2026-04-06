@@ -83,7 +83,8 @@ def ask(
         raise HTTPException(status_code=403, detail="해당 채팅방에 접근 권한이 없습니다.")
 
     past_messages = chat_history_service.list_session_messages(db, chat_id)
-    chat_history = [{"role": m.role, "content": m.content} for m in past_messages]
+    # 채팅 내역은 최근 3쌍(6개 메시지)만 유지하여 LLM 컨텍스트 초과 방지
+    chat_history = [{"role": m.role, "content": m.content} for m in past_messages[-6:]]
 
     chat_history_service.add_message(db, chat_id, "user", req.question)
 
