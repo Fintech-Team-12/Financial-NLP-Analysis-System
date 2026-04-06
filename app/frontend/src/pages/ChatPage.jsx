@@ -17,6 +17,8 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const skipFetchRef = useRef(false);
+
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
@@ -28,6 +30,12 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
         setMessages([
           { id: 'welcome', role: 'assistant', content: '안녕하세요! 감사보고서 분석 어시스턴트입니다. 새로운 대화를 시작했습니다. 무엇을 도와드릴까요?' }
         ]);
+        return;
+      }
+
+      // 방금 새 채팅을 만든 직후: 이미 메시지가 화면에 있으므로 DB 재조회 스킵
+      if (skipFetchRef.current) {
+        skipFetchRef.current = false;
         return;
       }
 
@@ -59,7 +67,6 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
     try {
       const payload = {
         question: userMessageContent,
-        year: 2024
       };
 
       if (currentChatId) {
@@ -71,15 +78,17 @@ const ChatPage = ({ currentChatId, setCurrentChatId }) => {
         timeout: 60000
       });
 
+      // 새 채팅이든 기존 채팅이든 메시지를 항상 화면에 표시
+      setMessages(prev => {
+        return [...prev.filter(m => m.id !== 'optimistic'),
+        { id: Date.now(), role: 'user', content: userMessageContent },
+        { id: Date.now() + 1, role: 'assistant', content: response.data.answer }
+        ];
+      });
+
       if (!currentChatId && response.data.chat_id) {
+        skipFetchRef.current = true;  // useEffect 재조회 방지
         setCurrentChatId(response.data.chat_id);
-      } else {
-        setMessages(prev => {
-          return [...prev.filter(m => m.id !== 'optimistic'),
-          { id: Date.now(), role: 'user', content: userMessageContent },
-          { id: Date.now() + 1, role: 'assistant', content: response.data.answer }
-          ];
-        });
       }
     } catch (error) {
       console.error('API Request Failed:', error);

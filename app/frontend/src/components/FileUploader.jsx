@@ -9,7 +9,7 @@ const FileUploader = ({ onClose }) => {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [uploaded, setUploaded] = useState(false);
-  
+
   const fileInputRef = useRef(null);
 
   const handleDragOver = (e) => {
@@ -49,10 +49,10 @@ const FileUploader = ({ onClose }) => {
     if (!file) return;
     setUploading(true);
     setProgress(0);
-    
+
     const formData = new FormData();
     formData.append('file', file);
-    
+
     const token = localStorage.getItem('token');
     try {
       await axios.post('http://localhost:8000/api/files/upload', formData, {
@@ -85,7 +85,7 @@ const FileUploader = ({ onClose }) => {
         </div>
 
         {!uploading && !uploaded && (
-          <div 
+          <div
             className={`dropzone ${isDragging ? 'dragging' : ''}`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -96,11 +96,11 @@ const FileUploader = ({ onClose }) => {
             <p>Drag & drop your file here</p>
             <span className="divider">or</span>
             <button className="browse-btn">Browse Files</button>
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              onChange={handleFileChange} 
-              style={{ display: 'none' }} 
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
               accept=".htm,.html"
             />
           </div>

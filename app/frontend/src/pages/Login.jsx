@@ -11,16 +11,16 @@ const Login = ({ onLogin }) => {
   const handleGoogleSuccess = async (credentialResponse) => {
     try {
       const { credential } = credentialResponse;
-      
+
       const res = await axios.post(`${API_BASE_URL}/auth/google`, {
         google_token: credential
       });
-      
+
       const { access_token, user_info } = res.data;
-      
+
       localStorage.setItem('token', access_token);
       localStorage.setItem('user', JSON.stringify(user_info));
-      
+
       onLogin(user_info);
     } catch (error) {
       console.error("Login failed", error);
@@ -38,15 +38,15 @@ const Login = ({ onLogin }) => {
         <div className="login-header">
           <div className="logo-icon">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 3v18h18"/>
-              <path d="m19 9-5 5-4-4-3 3"/>
+              <path d="M3 3v18h18" />
+              <path d="m19 9-5 5-4-4-3 3" />
             </svg>
           </div>
           <h1>Finance QA</h1>
           <p>Sign in to access your financial insights</p>
         </div>
 
-        {errorMsg && <p style={{color: '#ef4444', marginBottom: '1rem', fontSize: '0.9rem', textAlign: 'center'}}>{errorMsg}</p>}
+        {errorMsg && <p style={{ color: '#ef4444', marginBottom: '1rem', fontSize: '0.9rem', textAlign: 'center' }}>{errorMsg}</p>}
 
         <div className="google-auth-wrapper">
           <GoogleLogin
@@ -57,7 +57,7 @@ const Login = ({ onLogin }) => {
             width="100%"
           />
         </div>
-        
+
         <div className="login-footer">
           <p>By continuing, you agree to our Terms of Service</p>
         </div>

@@ -41,3 +41,15 @@ dist/
 dist-ssr/
 .vite
 *.local
+data/processed/
+
+
+
+.coverage
+.coverage.*
+.pytest_cache
+.ruff_cache
+.venv
+.venv_api
+.venv_ingest
+.agent

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 def test_chat_replaces_qa(auth_client: TestClient) -> None:
     """/qa 대신 /chat 이 정상 동작한다."""
     auth_client.post("/reports/ingest", json={"year": 2023})
-    response = auth_client.post("/chat", json={"question": "2023년 감사의견은?", "year": 2023})
+    response = auth_client.post("/api/chat", json={"question": "2023년 감사의견은?", "year": 2023})
     assert response.status_code == 200
     data = response.json()
     assert "answer" in data
